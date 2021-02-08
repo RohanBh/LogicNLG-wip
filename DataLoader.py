@@ -551,6 +551,69 @@ class GPTTableCoarseFineDatabase2(Dataloader):
         return pairs
 
 
+class GPTTableCoarseFineDatabase3(Dataloader):
+    def __init__(self, train_name, val_name, test_name, tokenizer, batch_size=5, max_len=800,
+                 window_size=15):
+        super(GPTTableCoarseFineDatabase3, self).__init__(None, val_name, test_name)
+        if train_name:
+            with open(train_name, 'r') as f:
+                self.train = json.load(f)
+
+        self.tokenizer = tokenizer
+        self.batch_size = batch_size
+        self.max_len = max_len
+        self.window_size = window_size
+
+    def train_len(self):
+        return int(len(self.train) // self.batch_size)
+
+    def get_train_data(self):
+        idx = random.choice(range(0, len(self.train)))
+
+        window = self.window_size  # int(self.batch_size / 2)
+        start_idx = max(0, idx - window)
+        end_idx = min(idx + window, len(self.train))
+
+        entries = copy.copy(self.train[start_idx: end_idx])
+        random.shuffle(entries)
+        entries = entries[:self.batch_size]
+
+        seqs = []
+        descs = []
+        seq_masks = []
+        for e in entries:
+            seqs.append(self.tokenizer.encode(e[0], add_special_tokens=False))
+            seq_masks.append([1] * len(seqs[-1]))
+
+            tmp = e[-1]
+
+            tmp_idx = self.tokenizer.tokenize(tmp)
+            if len(tmp_idx) > self.max_len:
+                tmp_idx = tmp_idx[:self.max_len]
+
+            tmp_prefix = self.tokenizer.tokenize('Given the table title of "{}" . '.format(e[2]))
+            tmp_suffix = self.tokenizer.tokenize('Start describing : ')
+            template = self.tokenizer.tokenize(e[3])
+            descs.append(self.tokenizer.convert_tokens_to_ids(tmp_prefix + tmp_idx + tmp_suffix + template))
+
+        length = max([len(_) for _ in seqs]) + 1
+        for i in range(len(seqs)):
+            seqs[i] += (length - len(seqs[i])) * [self.tokenizer.eos_token_id]
+            seq_masks[i] = seq_masks[i] + [1] + (length - len(seq_masks[i]) - 1) * [0]
+        seqs = torch.LongTensor(seqs)
+        seq_masks = torch.FloatTensor(seq_masks)
+
+        length = max([len(_) for _ in descs]) + 1
+        for i in range(len(descs)):
+            descs[i] = (length - len(descs[i])) * [self.tokenizer.eos_token_id] + descs[i]
+        descs = torch.LongTensor(descs)
+
+        inputs = seqs[:, :-1]
+        outputs = seqs
+
+        return inputs, outputs, seq_masks, descs
+
+
 class GPTTableDataset2(Dataset):
     def __init__(self, train_name, tokenizer, max_len):
         super(GPTTableDataset2, self).__init__()

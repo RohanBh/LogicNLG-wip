@@ -47,7 +47,6 @@ if __name__ == '__main__':
     parser.add_argument('--load_from', default='', type=str, help="Load model from this path")
     parser.add_argument('--id', default='models', type=str, help="ID of the experiment")
     parser.add_argument('--max_len', default=800, type=int, help="Max length of the table description")
-    parser.add_argument('--stage', default=1, type=int, help="Generation phase")
     parser.add_argument('--decode_first_K', type=int, default=10000, help="For debugging purpose")
     args = parser.parse_args()
 
@@ -61,7 +60,7 @@ if __name__ == '__main__':
 
     tokenizer = GPT2Tokenizer.from_pretrained(args.model)
 
-    tokenizer.add_tokens(['[ENT]', '[SEP]', '[IGN]'])
+    tokenizer.add_tokens(['[ENT]', '[SEP]'])
 
     model = GPT2LMHeadModel.from_pretrained(args.model)
     model.resize_token_embeddings(len(tokenizer))
@@ -76,10 +75,10 @@ if __name__ == '__main__':
     if args.do_train:
         recording_time = datetime.now().strftime('%m_%d_%H_%M')
         tb_writer = SummaryWriter(log_dir='tensorboard/GPT_stage{}_C2F/{}'.format(args.stage, recording_time))
-        dataset = GPTTableCoarseFineDatabase2('data/train_lm_new.json', None, None,
-                                              tokenizer, args.batch_size, args.max_len, args.stage, window_size=150)
-        if args.stage == 2:
-            model.load_state_dict(torch.load(args.load_from))
+        dataset = GPTTableCoarseFineDatabase3('data/train_lm_new.json', None, None,
+                                              tokenizer, args.batch_size, args.max_len, window_size=150)
+        # if args.stage == 2:
+        #     model.load_state_dict(torch.load(args.load_from))
 
         model.train()
         optimizer = optim.Adam(model.parameters(), args.learning_rate)
@@ -114,30 +113,30 @@ if __name__ == '__main__':
                 if idx % args.every == 0 and idx > 0:
                     tb_writer.add_scalar("perplexity", math.exp(avg_loss / args.every), global_step)
 
-                    fake_inputs = caption
-                    gt_inputs = trg_out.cpu().data.numpy()
+                    # fake_inputs = inputs
+                    # gt_inputs = trg_out.cpu().data.numpy()
 
-                    samples = sample_sequence(model, 50, fake_inputs, [])
-                    samples = samples[:, caption.shape[1]:]
-                    samples = samples.cpu().data.numpy()
-
-                    for s, gt in zip(samples, gt_inputs):
-                        print("EPOCH {}; FINISHED {}/{}".format(epoch_idx, idx, dataset.train_len()))
-                        text = tokenizer.decode(s, clean_up_tokenization_spaces=True)
-                        text = text[: text.find(tokenizer.eos_token)]
-                        print("PREDICTION |||||| ", text)
-                        text = tokenizer.decode(gt, clean_up_tokenization_spaces=True)
-                        text = text[: text.find(tokenizer.eos_token)]
-                        print("GROUNDTRUH |||||| ", text)
-                        break
+                    # samples = sample_sequence(model, 50, fake_inputs, [])
+                    # samples = samples[:, caption.shape[1]:]
+                    # samples = samples.cpu().data.numpy()
+                    #
+                    # for s, gt in zip(samples, gt_inputs):
+                    #     print("EPOCH {}; FINISHED {}/{}".format(epoch_idx, idx, dataset.train_len()))
+                    #     text = tokenizer.decode(s, clean_up_tokenization_spaces=True)
+                    #     text = text[: text.find(tokenizer.eos_token)]
+                    #     print("PREDICTION |||||| ", text)
+                    #     text = tokenizer.decode(gt, clean_up_tokenization_spaces=True)
+                    #     text = text[: text.find(tokenizer.eos_token)]
+                    #     print("GROUNDTRUH |||||| ", text)
+                    #     break
 
                     avg_loss = 0
 
             if args.model == 'gpt2':
-                torch.save(model.state_dict(), '{}/GPT_stage{}_C2F_ep{}.pt'.format(args.id, args.stage, epoch_idx))
+                torch.save(model.state_dict(), '{}/GPT_new_C2F_ep{}.pt'.format(args.id, epoch_idx))
             else:
                 torch.save(model.state_dict(),
-                           '{}/GPT_stage{}_C2F_medium_ep{}.pt'.format(args.id, args.stage, epoch_idx))
+                           '{}/GPT_new_C2F_medium_ep{}.pt'.format(args.id, epoch_idx))
 
     if args.do_test:
         assert 'stage2' in args.load_from, "The testing can only be done with stage2 model"
