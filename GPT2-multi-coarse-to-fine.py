@@ -76,8 +76,8 @@ if __name__ == '__main__':
     if args.do_train:
         recording_time = datetime.now().strftime('%m_%d_%H_%M')
         tb_writer = SummaryWriter(log_dir='tensorboard/GPT_stage{}_C2F/{}'.format(args.stage, recording_time))
-        dataset = GPTTableCoarseFineDatabase3('data/train_lm_preprocessed.json', None, None,
-                                              tokenizer, args.batch_size, args.max_len, args.stage)
+        dataset = GPTTableCoarseFineDatabase2('data/train_lm_new.json', None, None,
+                                              tokenizer, args.batch_size, args.max_len, args.stage, window_size=150)
         if args.stage == 2:
             model.load_state_dict(torch.load(args.load_from))
 
@@ -141,7 +141,7 @@ if __name__ == '__main__':
 
     if args.do_test:
         assert 'stage2' in args.load_from, "The testing can only be done with stage2 model"
-        dataset = GPTTableCoarseFineDatabase3(None, None, 'data/test_lm.json', tokenizer, args.batch_size, args.max_len,
+        dataset = GPTTableCoarseFineDatabase2(None, None, 'data/test_lm.json', tokenizer, args.batch_size, args.max_len,
                                               args.stage)
         model.load_state_dict(torch.load(args.load_from))
         model.eval()
@@ -208,7 +208,7 @@ if __name__ == '__main__':
     if args.do_verify:
         assert 'stage2' in args.load_from, "The testing can only be done with stage2 model"
         assert args.stage == 2, "The verification can only be done with stage 2 model"
-        dataset = GPTTableCoarseFineDatabase3(None, None, 'data/test_lm_pos_neg.json',
+        dataset = GPTTableCoarseFineDatabase2(None, None, 'data/test_lm_pos_neg.json',
                                               tokenizer, args.batch_size, args.max_len, args.stage)
 
         model.load_state_dict(torch.load(args.load_from))

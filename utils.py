@@ -1,3 +1,5 @@
+from itertools import chain, combinations
+
 import torch
 import torch.nn.functional as F
 
@@ -83,3 +85,9 @@ def sample_sequence(model, length, context, args, num_samples=1, temperature=1, 
                 break
 
     return generated
+
+
+def powerset(iterable):
+    "powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
+    s = list(iterable)
+    return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
