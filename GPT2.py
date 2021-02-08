@@ -1,28 +1,26 @@
 import argparse
-import logging
-from tqdm import trange
-import torch
-import torch.nn.functional as F
+import math
+import os
+import sys
+import time
+import warnings
+
+import nltk
 import numpy as np
+import torch.optim as optim
 from torch import nn
 from torch.autograd import Variable
-from transformers import GPT2Config
+from torch.utils.tensorboard import SummaryWriter
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, BertTokenizer
+
 from DataLoader import *
 from Model import BERTGen
 from utils import sample_sequence
-import torch.optim as optim
-import math
-import sys
-import pandas
-import os
-import numpy
-import nltk
-from torch.utils.tensorboard import SummaryWriter
-import warnings
+
 warnings.filterwarnings("ignore", category=UserWarning)
 
 device = torch.device('cuda')
+
 
 def set_seed(args):
     np.random.seed(args.seed)
@@ -40,11 +38,16 @@ if __name__ == '__main__':
     parser.add_argument('--do_train', default=False, action="store_true", help="whether to train or test the model")
     parser.add_argument('--do_rl', default=False, action="store_true", help="whether to train or test the model")
     parser.add_argument('--do_val', default=False, action="store_true", help="whether to train or test the model")
-    parser.add_argument('--do_test', default=False, action="store_true", help="whether to compute the BLEU scores on test split")
-    parser.add_argument('--do_test_challenge', default=False, action="store_true", help="whether to compute the BLEU scores on challenge split")
-    parser.add_argument('--do_ppl', default=False, action="store_true", help="whether to compute perplexity of the model")
-    parser.add_argument('--do_verify', default=False, action="store_true", help="whether compute the adv-acc score on test split")
-    parser.add_argument('--do_verify_challenge', default=False, action="store_true", help="whether compute the adv-acc score on challenge split")
+    parser.add_argument('--do_test', default=False, action="store_true",
+                        help="whether to compute the BLEU scores on test split")
+    parser.add_argument('--do_test_challenge', default=False, action="store_true",
+                        help="whether to compute the BLEU scores on challenge split")
+    parser.add_argument('--do_ppl', default=False, action="store_true",
+                        help="whether to compute perplexity of the model")
+    parser.add_argument('--do_verify', default=False, action="store_true",
+                        help="whether compute the adv-acc score on test split")
+    parser.add_argument('--do_verify_challenge', default=False, action="store_true",
+                        help="whether compute the adv-acc score on challenge split")
     parser.add_argument('--epoch', default=10, type=int, help="whether to train or test the model")
     parser.add_argument('--batch_size', default=5, type=int, help="whether to train or test the model")
     parser.add_argument('--learning_rate', default=2e-6, type=float, help="whether to train or test the model")
@@ -84,7 +87,7 @@ if __name__ == '__main__':
     criterion = nn.CrossEntropyLoss(reduction='none', ignore_index=-1)
     if args.do_train:
         tb_writer = SummaryWriter(log_dir='tensorboard/GPT2-{}'.format(args.model))
-        dataset = GPTTableDatabase('data/train_lm.json', None, None, tokenizer, args.batch_size, args.max_len)        
+        dataset = GPTTableDatabase('data/train_lm.json', None, None, tokenizer, args.batch_size, args.max_len)
         model.train()
         optimizer = optim.Adam(model.parameters(), args.learning_rate)
 
@@ -122,7 +125,7 @@ if __name__ == '__main__':
                     fake_inputs = caption
                     gt_inputs = trg_out.cpu().data.numpy()
 
-                    #samples = model.sample(fake_inputs, tabfeat, caption, highlight_idx, bert)
+                    # samples = model.sample(fake_inputs, tabfeat, caption, highlight_idx, bert)
                     samples = sample_sequence(model, 30, fake_inputs, [])
                     samples = samples[:, caption.shape[1]:]
                     samples = samples.cpu().data.numpy()
@@ -133,7 +136,7 @@ if __name__ == '__main__':
                         print("PREDICTION |||||| ", text)
                         text = tokenizer.decode(gt, clean_up_tokenization_spaces=True)
                         text = text[: text.find(tokenizer.eos_token)]
-                        print("GROUNDTRUH |||||| ",text)
+                        print("GROUNDTRUH |||||| ", text)
                         break
 
                     avg_loss = 0
@@ -204,7 +207,7 @@ if __name__ == '__main__':
                 losses.append(loss.item())
 
                 avg_loss = sum(losses) / len(losses)
-                perplexity = math.exp(avg_loss)                
+                perplexity = math.exp(avg_loss)
 
             print("test perplexity is {}".format(perplexity))
 
@@ -252,7 +255,8 @@ if __name__ == '__main__':
                 bleu_2 = format((sum(sent_bleus_2) / len(sent_bleus_2) * 100), '.2f')
                 bleu_3 = format((sum(sent_bleus_3) / len(sent_bleus_3) * 100), '.2f')
 
-                sys.stdout.write("finished {}/{} BLEU score {}/{}/{} \r".format(idx, dataset.test_len(), bleu_1, bleu_2, bleu_3))
+                sys.stdout.write(
+                    "finished {}/{} BLEU score {}/{}/{} \r".format(idx, dataset.test_len(), bleu_1, bleu_2, bleu_3))
 
             print("total corpus BLEU score = {}/{}/{}".format(bleu_1, bleu_2, bleu_3))
 
@@ -260,11 +264,13 @@ if __name__ == '__main__':
             json.dump(results, f, indent=2)
 
     if args.do_test_challenge:
-        dataset = GPTTableDatabase(None, None, 'challenge/blind_test_lm_inputs.json', tokenizer, args.batch_size, args.max_len)
+        dataset = GPTTableDatabase(None, None, 'challenge/blind_test_lm_inputs.json', tokenizer, args.batch_size,
+                                   args.max_len)
         model.load_state_dict(torch.load(args.load_from))
         model.eval()
 
         results = {}
+        start_time = time.time()
         with torch.no_grad():
             for idx in range(0, min(args.decode_first_K, dataset.test_len())):
                 batch = dataset.get_data(idx, 'test')
@@ -287,11 +293,12 @@ if __name__ == '__main__':
                     text = text[: text.find(tokenizer.eos_token)]
                     results[table_id].append(text)
 
-                sys.stdout.write("finished {}/{}; speed={}s/sent \r".format(idx, 
-                                 dataset.test_len(), (time.time() - start_time) / len(results)))
-        
+                sys.stdout.write(
+                    "finished {}/{}; speed={}s/sent \r".format(
+                        idx, dataset.test_len(), (time.time() - start_time) / len(results)))
+
         with open('challenge/test_results.json', 'w') as f:
-            json.dump(results, f, indent=2)        
+            json.dump(results, f, indent=2)
 
     if args.do_verify:
         dataset = GPTTableDatabase(None, None, 'data/test_lm_pos_neg.json', tokenizer, args.batch_size, args.max_len)
@@ -335,7 +342,8 @@ if __name__ == '__main__':
         print('total accuracy = {}'.format(correct / total))
 
     if args.do_verify_challenge:
-        dataset = GPTTableDatabase(None, None, 'challenge/blind_test_lm_pos_neg.json', tokenizer, args.batch_size, args.max_len)
+        dataset = GPTTableDatabase(None, None, 'challenge/blind_test_lm_pos_neg.json', tokenizer, args.batch_size,
+                                   args.max_len)
         model.load_state_dict(torch.load(args.load_from))
         model.eval()
         correct, total = 0, 0
@@ -380,7 +388,7 @@ if __name__ == '__main__':
                         results[table_name].append('unknown2')
 
                 sys.stdout.write('finished {}/{}\r'.format(idx, dataset.test_len()))
-        
+
         with open('challenge/verify_results.json', 'w') as f:
             json.dump(results, f, indent=2)
 
@@ -426,6 +434,7 @@ if __name__ == '__main__':
 
             return token_rewards
 
+
         model.load_state_dict(torch.load(args.load_from))
         print("loading from {}".format(args.load_from))
         model.train()
@@ -455,7 +464,7 @@ if __name__ == '__main__':
                     samples = samples[:, caption.shape[1]:][0]
                     samples = samples.cpu().data.numpy()
 
-                    end = numpy.where(samples == tokenizer.eos_token_id)[0]
+                    end = np.where(samples == tokenizer.eos_token_id)[0]
                     if len(end) > 0:
                         samples = samples[:end[0]]
 
@@ -478,16 +487,16 @@ if __name__ == '__main__':
 
                     with torch.no_grad():
                         logits = scorer(inputs, desc)
-                        loss = criterion(logits.view(-1, logits.shape[-1]),
-                                         outputs.view(-1)).view(logits.shape[0], -1).cpu().data
+                        loss = criterion(logits.view(-1, logits.shape[-1]), outputs.view(-1))
+                        loss = loss.view(logits.shape[0], -1).cpu().data
                         prob = torch.exp(-loss)
                         indexes = torch.arange(0, logits.shape[0])[:, None].long()
                         probs = torch.gather(prob, -1, indexes)
                         rewards = assemble_distribute(samples, probs.view(-1).numpy(), tokenizer, bert_tokenizer)
 
                     rewards = torch.FloatTensor(rewards).to(args.device)
-                    #rewards = torch.cat([rewards, torch.FloatTensor([1.0]).to(device)], 0)
-                    #rewards = rewards - torch.mean(rewards)
+                    # rewards = torch.cat([rewards, torch.FloatTensor([1.0]).to(device)], 0)
+                    # rewards = rewards - torch.mean(rewards)
                     rewards = Variable(rewards)
 
                     samples = torch.from_numpy(samples).to(args.device).unsqueeze(0)
@@ -523,14 +532,14 @@ if __name__ == '__main__':
                     optimizer.zero_grad()
 
                 if (idx + 1) % args.every == 0:
-                    #sys.stdout.write('finished {} samples loss = {} \r'.format(idx, avg_loss / 50))
+                    # sys.stdout.write('finished {} samples loss = {} \r'.format(idx, avg_loss / 50))
                     print('finished {} samples loss = {}, perpelexity = {}'.format(
                         idx, avg_loss / args.every, math.exp(avg_loss / args.every)))
 
                     fake_inputs = caption
                     gt_inputs = trg_out.cpu().data.numpy()
 
-                    #samples = model.sample(fake_inputs, tabfeat, caption, highlight_idx, bert)
+                    # samples = model.sample(fake_inputs, tabfeat, caption, highlight_idx, bert)
                     samples = sample_sequence(model, 30, fake_inputs, [])
                     samples = samples[:, caption.shape[1]:]
                     samples = samples.cpu().data.numpy()

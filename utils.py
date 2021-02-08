@@ -33,15 +33,15 @@ def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float('Inf')
     return logits
 
 
-def sample_sequence(model, length, context, args, num_samples=1, temperature=1, stop_token=None, \
-                    trigger=None, supress=None, repetition=None, top_k=0, top_p=0.0,  device='cuda'):
+def sample_sequence(model, length, context, args, num_samples=1, temperature=1, stop_token=None,
+                    trigger=None, supress=None, repetition=None, top_k=0, top_p=0.0, device='cuda'):
     if isinstance(context, list):
         context = torch.tensor(context, dtype=torch.long, device=device)
         context = context.unsqueeze(0).repeat(num_samples, 1)
 
     generated = context
     batch_size = generated.shape[0]
-    
+
     finished_template = [False for _ in range(batch_size)]
     finished_sentence = [False for _ in range(batch_size)]
     with torch.no_grad():
@@ -52,7 +52,7 @@ def sample_sequence(model, length, context, args, num_samples=1, temperature=1, 
             else:
                 next_token_logits = outputs[:, -1, :] / (temperature if temperature > 0 else 1.)
 
-            #next_token_logits[:, generated[-1].tolist()] /= repetition
+            # next_token_logits[:, generated[-1].tolist()] /= repetition
             if repetition is not None:
                 for b in range(batch_size):
                     if generated[:, -1][b].item() == repetition:
@@ -69,7 +69,7 @@ def sample_sequence(model, length, context, args, num_samples=1, temperature=1, 
                 next_token = torch.argmax(filtered_logits, dim=-1).unsqueeze(-1)
             else:
                 next_token = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=1)
-            
+
             if trigger:
                 for b in range(batch_size):
                     if next_token[b].item() == trigger:
