@@ -74,7 +74,7 @@ if __name__ == '__main__':
     criterion = nn.CrossEntropyLoss(reduction='none', ignore_index=-1)
     if args.do_train:
         recording_time = datetime.now().strftime('%m_%d_%H_%M')
-        tb_writer = SummaryWriter(log_dir='tensorboard/GPT_stage{}_C2F/{}'.format(args.stage, recording_time))
+        tb_writer = SummaryWriter(log_dir='tensorboard/GPT_new_C2F/{}'.format(recording_time))
         dataset = GPTTableCoarseFineDatabase3('data/train_lm_new.json', None, None,
                                               tokenizer, args.batch_size, args.max_len, window_size=150)
         # if args.stage == 2:
@@ -133,10 +133,17 @@ if __name__ == '__main__':
                     avg_loss = 0
 
             if args.model == 'gpt2':
-                torch.save(model.state_dict(), '{}/GPT_new_C2F_ep{}.pt'.format(args.id, epoch_idx))
+                torch.save({
+                    'epoch': epoch_idx,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict()},
+                    '{}/GPT_new_C2F_ep{}.pt'.format(args.id, epoch_idx))
             else:
-                torch.save(model.state_dict(),
-                           '{}/GPT_new_C2F_medium_ep{}.pt'.format(args.id, epoch_idx))
+                torch.save({
+                    'epoch': epoch_idx,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict()},
+                    '{}/GPT_new_C2F_medium_ep{}.pt'.format(args.id, epoch_idx))
 
     if args.do_test:
         assert 'stage2' in args.load_from, "The testing can only be done with stage2 model"
