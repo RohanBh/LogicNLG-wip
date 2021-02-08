@@ -41,6 +41,8 @@ if __name__ == '__main__':
                         help="Number of epochs to train the model")
     parser.add_argument('--batch_size', default=6, type=int,
                         help="Total examples per table to use")
+    parser.add_argument('--window_size', default=15, type=int,
+                        help="Size of window for shuffling when creating a batch")
     parser.add_argument('--learning_rate', default=2e-6, type=float)
     parser.add_argument('--every', default=50, type=int, help="Evaluate after how many steps")
     parser.add_argument('--start_epoch', default=0, type=int, help="Resume from epoch")
@@ -76,7 +78,7 @@ if __name__ == '__main__':
         recording_time = datetime.now().strftime('%m_%d_%H_%M')
         tb_writer = SummaryWriter(log_dir='tensorboard/GPT_new_C2F/{}'.format(recording_time))
         dataset = GPTTableCoarseFineDatabase3('data/train_lm_new.json', None, None,
-                                              tokenizer, args.batch_size, args.max_len, window_size=150)
+                                              tokenizer, args.batch_size, args.max_len, window_size=args.window_size)
         # if args.stage == 2:
         #     model.load_state_dict(torch.load(args.load_from))
 
