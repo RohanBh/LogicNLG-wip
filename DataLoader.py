@@ -553,7 +553,7 @@ class GPTTableCoarseFineDatabase2(Dataloader):
 
 class GPTTableCoarseFineDatabase3(Dataloader):
     def __init__(self, train_name, val_name, test_name, tokenizer, batch_size=5, max_len=800,
-                 window_size=15):
+                 window_size=15, random_sampling=10):
         super(GPTTableCoarseFineDatabase3, self).__init__(None, val_name, test_name)
         if train_name:
             with open(train_name, 'r') as f:
@@ -563,9 +563,10 @@ class GPTTableCoarseFineDatabase3(Dataloader):
         self.batch_size = batch_size
         self.max_len = max_len
         self.window_size = window_size
+        self.random_sampling = random_sampling / 100
 
     def train_len(self):
-        return int(len(self.train) // self.batch_size)
+        return int(len(self.train) * self.random_sampling // self.batch_size)
 
     def get_train_data(self):
         idx = random.choice(range(0, len(self.train)))
