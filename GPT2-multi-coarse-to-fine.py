@@ -11,6 +11,7 @@ import torch.optim as optim
 from torch import nn
 from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
+from tqdm.auto import tqdm
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
 from DataLoader import *
@@ -89,7 +90,7 @@ if __name__ == '__main__':
         global_step = 0
         for epoch_idx in range(args.start_epoch, args.start_epoch + args.epoch):
             print("start training {}th epoch".format(epoch_idx))
-            for idx in range(0, dataset.train_len()):
+            for idx in tqdm(range(0, dataset.train_len()), total=dataset.train_len()):
                 batch = dataset.get_train_data()
                 batch = tuple(Variable(t).to(device) for t in batch)
                 trg_inp, trg_out, mask, caption = batch
