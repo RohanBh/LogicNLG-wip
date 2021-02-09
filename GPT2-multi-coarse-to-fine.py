@@ -91,6 +91,11 @@ if __name__ == '__main__':
 
         avg_loss = 0
         global_step = 0
+        if args.start_epoch != 0:
+            checkpoint = torch.load('{}/GPT_new_C2F_ep{}.pt'.format(args.id, args.start_epoch - 1))
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
         for epoch_idx in range(args.start_epoch, args.start_epoch + args.epoch):
             print("start training {}th epoch".format(epoch_idx))
             for idx in tqdm(range(0, dataset.train_len()), total=dataset.train_len()):
