@@ -80,6 +80,8 @@ def comp_data_len_2():
 def get_ent_vals(yt, y):
     yt += '[SPECIAL_EOS]'
     y += '[SPECIAL_EOS]'
+    yt = yt.replace(' ,', ',')
+    y = y.replace(' ,', ',')
 
     ent_list = []
 
@@ -210,7 +212,14 @@ def ent_2_stats():
         template = entry[3]
         ent_dist.append(count_ent_1(template))
 
-    print(f"Percentiles: {np.percentile(ent_dist, [0, 25, 50, 75, 80, 95, 100])}")
+    tqdm.write(f"#ENT Percentiles: {np.percentile(ent_dist, [0, 25, 50, 75, 80, 95, 100])}")
+
+    ent_len_dist = []
+    for entry in tqdm(train_data):
+        template = entry[3]
+        ent_len_dist.append(len(template.split(' ')))
+    tqdm.write(f"Sentence length Percentiles: {np.percentile(ent_len_dist, [0, 25, 50, 75, 80, 95, 100])}")
+    tqdm.write(f"mean {np.mean(ent_len_dist)}")
     return
 
 

@@ -173,6 +173,7 @@ if __name__ == '__main__':
         # temp_res = {}
         start_time = time.time()
         total_its = min(args.decode_first_K, dataset.test_len())
+        error_set = set()
         with torch.no_grad():
             for idx in tqdm(range(0, total_its), total=total_its):
                 references = dataset.get_reference(idx, 'test')
@@ -188,7 +189,7 @@ if __name__ == '__main__':
                     trg_inp, trg_out, mask, caption = batch
                     fake_inputs = caption
 
-                    samples = sample_sequence_2(model, 50, fake_inputs, [], stop_token=tokenizer.eos_token_id,
+                    samples = sample_sequence_2(model, 70, fake_inputs, [], stop_token=tokenizer.eos_token_id,
                                                 top_k=1, supress=[tokenizer.convert_tokens_to_ids('[SEP]'),
                                                                   tokenizer.convert_tokens_to_ids('[ENT]')])
 
@@ -204,7 +205,10 @@ if __name__ == '__main__':
                         text = clean_str([text])[0]
 
                         intermediate.append(text)
-                        ent_list = get_ent_vals(tmplts[b_idx], text)
+                        try:
+                            ent_list = get_ent_vals(tmplts[b_idx], text)
+                        except ValueError as e:
+                            error_set.add((str(e), tmplts[b_idx], text))
                         if len(ent_list) == 0:
                             override_templates.append(text)
                             ent_absent_list.append(True)
@@ -246,6 +250,9 @@ if __name__ == '__main__':
 
         with open('outputs/GPT_new_{}_C2F_{}_res.json'.format(args.model, bleu_3), 'w') as f:
             json.dump(results, f, indent=2)
+
+        with open('outputs/GPT_new_{}_CSF_{}_error.json'.format(args.model, bleu_3), 'w') as f:
+            json.dump(list(error_set), f, indent=2)
 
         # with open('outputs/GPT_new_{}_C2F_{}_tmp.json'.format(args.model, bleu_3), 'w') as f:
         #     json.dump(temp_res, f, indent=2)
