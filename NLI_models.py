@@ -1,11 +1,25 @@
-import torch.nn as nn
-import torch
 import math
+
+import torch
+import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from allennlp.nn import util
-from transformers import BertModel, XLNetModel, XLNetForSequenceClassification, BertForSequenceClassification
-from transformers import BertConfig
+from transformers import BertModel
+
+
+def replace_masked_values(tensor, mask, replace_with):
+    """
+    Replaces all masked values in `tensor` with `replace_with`.  `mask` must be broadcastable
+    to the same shape as `tensor`. We require that `tensor.dim() == mask.dim()`, as otherwise we
+    won't know which dimensions of the mask to unsqueeze.
+    This just does `tensor.masked_fill()`, except the pytorch method fills in things with a mask
+    value of 1, where we want the opposite.  You can do this in your own code with
+    `tensor.masked_fill(~mask, replace_with)`.
+    """
+    if tensor.dim() != mask.dim():
+        raise ValueError(
+            "tensor.dim() (%d) != mask.dim() (%d)" % (tensor.dim(), mask.dim())
+        )
+    return tensor.masked_fill(~mask, replace_with)
 
 
 class FC(nn.Module):
@@ -193,7 +207,8 @@ class SAEncoder(nn.Module):
     def __init__(self, hidden_size, head_num, ff_size, dropout, hidden_size_head, layers):
         super(SAEncoder, self).__init__()
         self.encoders = nn.ModuleList([SA(hidden_size=hidden_size, head_num=head_num, ff_size=ff_size,
-                                          dropout=dropout, hidden_size_head=hidden_size // head_num) for _ in range(layers)])
+                                          dropout=dropout, hidden_size_head=hidden_size // head_num) for _ in
+                                       range(layers)])
 
     def forward(self, x, x_mask=None):
         for layer in self.encoders:
@@ -205,7 +220,8 @@ class GAEncoder(nn.Module):
     def __init__(self, hidden_size, head_num, ff_size, dropout, hidden_size_head, layers):
         super(GAEncoder, self).__init__()
         self.encoders = nn.ModuleList([GA(hidden_size=hidden_size, head_num=head_num, ff_size=ff_size,
-                                          dropout=dropout, hidden_size_head=hidden_size // head_num) for _ in range(layers)])
+                                          dropout=dropout, hidden_size_head=hidden_size // head_num) for _ in
+                                       range(layers)])
 
     def forward(self, x, y, y_mask, x_mask=None):
         for layer in self.encoders:
@@ -218,7 +234,8 @@ class CREncoder(nn.Module):
         super(CREncoder, self).__init__()
         self.embedding = nn.Embedding(2, hidden_size)
         self.encoders = nn.ModuleList([SA(hidden_size=hidden_size, head_num=head_num, ff_size=ff_size,
-                                          dropout=dropout, hidden_size_head=hidden_size // head_num) for _ in range(layers)])
+                                          dropout=dropout, hidden_size_head=hidden_size // head_num) for _ in
+                                       range(layers)])
 
     def forward(self, x, x_mask, y, y_mask):
         t1_mask = torch.cat([x_mask, y_mask], -1)
@@ -263,7 +280,7 @@ class NumGNN(nn.Module):
 
         d_node_neighbor_num = dd_graph_left.sum(-1) + dd_graph_right.sum(-1)
         d_node_neighbor_num_mask = (d_node_neighbor_num >= 1).long()
-        d_node_neighbor_num = util.replace_masked_values(d_node_neighbor_num.float(), d_node_neighbor_num_mask, 1)
+        d_node_neighbor_num = replace_masked_values(d_node_neighbor_num.float(), d_node_neighbor_num_mask, 1)
 
         for step in range(self.iteration_steps):
             d_node_weight = torch.sigmoid(self._node_weight_fc(d_node)).squeeze(-1)
@@ -272,7 +289,7 @@ class NumGNN(nn.Module):
 
             dd_node_info_left = self._dd_node_fc_left(d_node)
 
-            dd_node_weight = util.replace_masked_values(
+            dd_node_weight = replace_masked_values(
                 d_node_weight.unsqueeze(1).expand(-1, d_node_len, -1),
                 dd_graph_left,
                 0)
@@ -281,7 +298,7 @@ class NumGNN(nn.Module):
 
             dd_node_info_right = self._dd_node_fc_right(d_node)
 
-            dd_node_weight = util.replace_masked_values(
+            dd_node_weight = replace_masked_values(
                 d_node_weight.unsqueeze(1).expand(-1, d_node_len, -1),
                 dd_graph_right,
                 0)
@@ -316,6 +333,7 @@ class TableEncoder(nn.Module):
             x = self.FUSION(*args)
             x = self.CLASSIFIER(x)
             return x
+
 
 class GNN(nn.Module):
     def __init__(self, dim, head, model_type, config, label_num, layers=3, dropout=0.1, attention='self'):

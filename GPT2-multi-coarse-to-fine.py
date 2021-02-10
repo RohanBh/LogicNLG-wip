@@ -208,6 +208,7 @@ if __name__ == '__main__':
                         try:
                             ent_list = get_ent_vals(tmplts[b_idx], text)
                         except ValueError as e:
+                            ent_list = []
                             error_set.add((str(e), tmplts[b_idx], text))
                         if len(ent_list) == 0:
                             override_templates.append(text)
@@ -251,7 +252,7 @@ if __name__ == '__main__':
         with open('outputs/GPT_new_{}_C2F_{}_res.json'.format(args.model, bleu_3), 'w') as f:
             json.dump(results, f, indent=2)
 
-        with open('outputs/GPT_new_{}_CSF_{}_error.json'.format(args.model, bleu_3), 'w') as f:
+        with open('outputs/GPT_new_{}_C2F_{}_error.json'.format(args.model, bleu_3), 'w') as f:
             json.dump(list(error_set), f, indent=2)
 
         # with open('outputs/GPT_new_{}_C2F_{}_tmp.json'.format(args.model, bleu_3), 'w') as f:

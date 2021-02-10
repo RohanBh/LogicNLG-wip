@@ -1,20 +1,18 @@
-import json
-from NLI_models import *
-import os
-import pandas
-from transformers import BertTokenizer
-import torch
-import torch.optim as optim
-import scipy.stats as ss
 import argparse
-from itertools import chain
-import sys
+import json
+import os
 import random
-from transformers import AdamW, get_linear_schedule_with_warmup
+
+import pandas
 from tensorboardX import SummaryWriter
-from tqdm import tqdm, trange
+from tqdm import tqdm
+from transformers import AdamW, get_linear_schedule_with_warmup
+from transformers import BertTokenizer
+
+from NLI_models import *
 
 device = torch.device('cuda')
+
 
 def parse_opt():
     parser = argparse.ArgumentParser()
@@ -26,13 +24,13 @@ def parse_opt():
     parser.add_argument('--max_len', default=30, type=int, help="maximum length")
     parser.add_argument('--do_train', default=False, action="store_true", help="whether to train or test the model")
     parser.add_argument('--do_test', default=False, action="store_true", help="whether to train or test the model")
-    parser.add_argument('--do_verify', default=False, action="store_true", help="whether to verify")    
+    parser.add_argument('--do_verify', default=False, action="store_true", help="whether to verify")
     parser.add_argument('--simple', default=False, action="store_true", help="which version of test to use")
     parser.add_argument('--complex', default=False, action="store_true", help="which version of test to use")
     parser.add_argument('--fp16', default=False, action="store_true", help="whether to use fp16")
     parser.add_argument("--fp16_opt_level", type=str, default="O1",
                         help="For fp16: Apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."
-                        "See details at https://nvidia.github.io/apex/amp.html")
+                             "See details at https://nvidia.github.io/apex/amp.html")
     parser.add_argument('--lr_default', type=float, default=2e-5, help="learning rate")
     parser.add_argument('--load_from', default='', type=str, help="whether to train or test the model")
     parser.add_argument("--weight_decay", default=0.0, type=float, help="Weight decay if we apply some.")
@@ -43,7 +41,7 @@ def parse_opt():
     parser.add_argument('--model', default='bert-base-multilingual-uncased', type=str, help='base model')
     parser.add_argument('--output_dir', default='models/baseline', type=str, help='output directory')
     parser.add_argument('--verify_file', default=None, type=str, help='Input verify file')
-    parser.add_argument('--verify_linking', default=None, type=str, help='Link file to obtain meta information')    
+    parser.add_argument('--verify_linking', default=None, type=str, help='Link file to obtain meta information')
     parser.add_argument('--encoding', default='concat', type=str,
                         help='the type of table encoder; choose from concat|row|cell')
     parser.add_argument('--max_length', default=512, type=int, help='sequence length constraint')
@@ -51,10 +49,11 @@ def parse_opt():
     parser.add_argument('--id', default=1, type=int, help='model id')
     parser.add_argument('--attention', default='cross', type=str,
                         help='the attention used for interaction between statement and table')
-    parser.add_argument("--csv_path", default='data/all_csv', type=str, help="all_csv path")    
+    parser.add_argument("--csv_path", default='data/all_csv', type=str, help="all_csv path")
     args = parser.parse_args()
 
     return args
+
 
 def forward_pass(f, example, model, split):
     table = pandas.read_csv('{}/{}'.format(args.csv_path, f), '#')
@@ -189,7 +188,7 @@ def forward_pass(f, example, model, split):
             stat_masks.append([1] * end + [0] * (max_len_stat - end))
 
         stat_representation = stat_representation.to(device)
-       	graph_representation = graph_representation.view(batch_size, -1, graph_representation.shape[-1]).to(device)
+        graph_representation = graph_representation.view(batch_size, -1, graph_representation.shape[-1]).to(device)
 
         if args.attention == 'self':
             x_masks = torch.cat([torch.tensor(stat_masks), torch.tensor(table_masks)], 1).to(device)
@@ -242,6 +241,7 @@ if __name__ == "__main__":
 
         if args.fp16:
             from apex import amp
+
             model, optimizer = amp.initialize(model, optimizer, opt_level=args.fp16_opt_level)
 
         cross_entropy = torch.nn.CrossEntropyLoss()
@@ -273,7 +273,7 @@ if __name__ == "__main__":
                     loss.backward()
 
                 if (local_step + 1) % args.gradient_accumulation_steps == 0:
-                    #torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                    # torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                     if args.fp16:
                         torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
 
@@ -358,9 +358,9 @@ if __name__ == "__main__":
                 total += correct_or_not.shape[0]
 
                 acc = correct / total
-                #sys.stdout.write("finished {}/{}, the accuracy is {} \r".format(i, len(files), acc))
+                # sys.stdout.write("finished {}/{}, the accuracy is {} \r".format(i, len(files), acc))
                 predictions[f] = {'statements': examples[f][0], 'labels': examples[f]
-                                  [-2], 'predictions': preds.data.cpu().numpy().tolist()}
+                [-2], 'predictions': preds.data.cpu().numpy().tolist()}
 
             print("the final accuracy is {}".format(acc))
 
@@ -378,7 +378,7 @@ if __name__ == "__main__":
 
         print("loading file from {}".format(args.verify_file))
         files = list(examples.keys())
-        
+
         succ, fail = 0, 0
         with torch.no_grad():
             correct, total = 0, 0
@@ -392,7 +392,7 @@ if __name__ == "__main__":
                     cols.append(link[1])
                     labels.append(-1)
                 examples[f] = [r, cols, labels, title]
-                
+
                 logits, labels = forward_pass(f, examples[f], model, 'test')
 
                 preds = torch.argmax(logits, -1)
