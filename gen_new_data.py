@@ -81,12 +81,11 @@ def get_ent_vals(yt, y):
     yt += '[SPECIAL_EOS]'
     y += '[SPECIAL_EOS]'
 
-    yts = yt.split('[ENT]')
     ent_list = []
 
     y_start = 0
     all_pos = []
-    for sub in yts:
+    for sub in yt.split('[ENT]'):
         tmp = y.find(sub, y_start)
         if tmp == -1:
             raise ValueError(f"Wrong input:\nTemplate: {yt},\nTrue: {y}")

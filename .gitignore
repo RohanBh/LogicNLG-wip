@@ -10,3 +10,4 @@ models/
 parser_models.zip
 parser_models/
 tensorboard/*
+*~

@@ -1,4 +1,5 @@
 import argparse
+import re
 import time
 
 from torch import nn
@@ -12,14 +13,15 @@ from utils import sample_sequence
 
 device = torch.device('cuda')
 
-# def clean_str(strings):
-#     new_strings = []
-#     for string in strings:
-#         string = re.sub(r' +', ' ', string)
-#         if len(string.split(' ')) < 6 and len(new_strings) > 0:
-#             string = new_strings[-1]
-#         new_strings.append(string)
-#     return new_strings
+
+def clean_str(strings):
+    new_strings = []
+    for string in strings:
+        string = re.sub(r' +', ' ', string)
+        if len(string.split(' ')) < 6 and len(new_strings) > 0:
+            string = new_strings[-1]
+        new_strings.append(string)
+    return new_strings
 
 
 if __name__ == '__main__':
@@ -97,9 +99,7 @@ if __name__ == '__main__':
                     # text = text[: text.find(tokenizer.eos_token)]
                     intermediate.append(improve_yt(text))
 
-                # TODO: try what happens with clean_str
-                results[table_id] = intermediate
-                # results[table_id] = clean_str(results[table_id])
+                results[table_id] = clean_str(intermediate)
 
-        with open('data/test_lm_template.json'.format(args.model), 'w') as f:
+        with open('data/test_lm_template.json', 'w') as f:
             json.dump(results, f, indent=2)

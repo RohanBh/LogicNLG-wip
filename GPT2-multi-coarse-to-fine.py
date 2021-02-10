@@ -170,7 +170,7 @@ if __name__ == '__main__':
         sent_bleus_3 = []
 
         results = {}
-        temp_res = {}
+        # temp_res = {}
         start_time = time.time()
         total_its = min(args.decode_first_K, dataset.test_len())
         with torch.no_grad():
@@ -247,8 +247,8 @@ if __name__ == '__main__':
         with open('outputs/GPT_new_{}_C2F_{}_res.json'.format(args.model, bleu_3), 'w') as f:
             json.dump(results, f, indent=2)
 
-        with open('outputs/GPT_new_{}_C2F_{}_tmp.json'.format(args.model, bleu_3), 'w') as f:
-            json.dump(temp_res, f, indent=2)
+        # with open('outputs/GPT_new_{}_C2F_{}_tmp.json'.format(args.model, bleu_3), 'w') as f:
+        #     json.dump(temp_res, f, indent=2)
 
     if args.do_verify:
         assert 'stage2' in args.load_from, "The testing can only be done with stage2 model"
