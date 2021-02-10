@@ -3,6 +3,7 @@ import json
 
 from utils import powerset
 from tqdm.auto import tqdm
+import numpy as np
 
 
 def count_ent_1(template):
@@ -185,13 +186,31 @@ def create_new_json():
     return
 
 
+def ent_2_stats():
+    train_name = 'data/train_lm_new.json'
+    with open(train_name, 'r') as f:
+        train_data = json.load(f)
+
+    ent_dist = []
+    for entry in tqdm(train_data):
+        template = entry[3]
+        ent_dist.append(count_ent_1(template))
+
+    print(f"Percentiles: {np.percentile(ent_dist, [0, 25, 50, 75, 80, 95, 100])}")
+    return
+
+
 if __name__ == '__main__':
     # comp_data_len_1()
     # comp_data_len_2()
     # create_new_json()
+
     # with open('data/train_lm.json', 'r') as f:
     #     train_data = json.load(f)
     #     print(f"Total tables: {len(list(train_data.keys()))}")
-    with open('data/train_lm_new.json', 'r') as f:
-        train_data = json.load(f)
-        print(f"Total Entries: {len(train_data)}")
+
+    # with open('data/train_lm_new.json', 'r') as f:
+    #     train_data = json.load(f)
+    #     print(f"Total Entries: {len(train_data)}")
+
+    ent_2_stats()

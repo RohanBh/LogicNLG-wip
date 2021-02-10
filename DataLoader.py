@@ -654,7 +654,7 @@ class GPTTableCoarseFineDatabase3(Dataloader):
             tmp_suffix = self.tokenizer.tokenize('Start describing : ')
             # template = self.tokenizer.tokenize(e[3])
             # TODO: Call improve template function here
-            template = self.templates[table_id][e_idx]
+            template = self.tokenizer.tokenize(self.templates[table_id][e_idx])
             descs.append(self.tokenizer.convert_tokens_to_ids(tmp_prefix + tmp_idx + tmp_suffix + template))
 
         length = max([len(_) for _ in seqs]) + 1

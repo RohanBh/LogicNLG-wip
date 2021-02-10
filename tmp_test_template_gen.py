@@ -7,6 +7,7 @@ from tqdm.auto import tqdm
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
 from DataLoader import *
+from gen_new_data import improve_yt
 from utils import sample_sequence
 
 device = torch.device('cuda')
@@ -94,10 +95,11 @@ if __name__ == '__main__':
                     text = tokenizer.decode(s, clean_up_tokenization_spaces=True)
                     text = text[:text.find('[SEP]')].strip()
                     # text = text[: text.find(tokenizer.eos_token)]
-                    intermediate.append(text)
+                    intermediate.append(improve_yt(text))
 
                 # TODO: try what happens with clean_str
-                # results[table_id] = clean_str(intermediate)
+                results[table_id] = intermediate
+                # results[table_id] = clean_str(results[table_id])
 
         with open('data/test_lm_template.json'.format(args.model), 'w') as f:
             json.dump(results, f, indent=2)
