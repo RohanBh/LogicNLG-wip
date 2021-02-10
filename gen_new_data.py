@@ -1,9 +1,10 @@
 import copy
 import json
 
-from utils import powerset
-from tqdm.auto import tqdm
 import numpy as np
+from tqdm.auto import tqdm
+
+from utils import powerset
 
 
 def count_ent_1(template):
@@ -76,7 +77,7 @@ def comp_data_len_2():
 #     return ent_list
 
 
-def _get_ent_vals(yt, y):
+def get_ent_vals(yt, y):
     yt += '[SPECIAL_EOS]'
     y += '[SPECIAL_EOS]'
 
@@ -96,6 +97,20 @@ def _get_ent_vals(yt, y):
         ent_list.append(y[i[1]:j[0]])
 
     return ent_list
+
+
+def ent_mask(yt, y, mask):
+    ent_list = get_ent_vals(yt, y)
+
+    new_y = []
+    ent_ix = 0
+    for w in yt.split(' '):
+        if w == '[ENT]':
+            new_y.append(ent_list[ent_ix] if mask[ent_ix] else w)
+            ent_ix += 1
+        else:
+            new_y.append(w)
+    return ' '.join(new_y)
 
 
 # def improve_yt(yt, transform_numeric=False):
@@ -138,7 +153,7 @@ def _duplicate_entry(entry):
     y = entry[0]
 
     yt = improve_yt(yt)
-    ent_list = _get_ent_vals(yt, y)
+    ent_list = get_ent_vals(yt, y)
     total_ents = len(ent_list)
 
     split_yt = yt.split(' ')

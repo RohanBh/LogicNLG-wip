@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 
 import nltk
+import numpy as np
 import torch.optim as optim
 from torch import nn
 from torch.autograd import Variable
@@ -15,6 +16,7 @@ from tqdm.auto import tqdm
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
 from DataLoader import *
+from gen_new_data import get_ent_vals, ent_mask
 from utils import sample_sequence_2
 
 device = torch.device('cuda')
@@ -173,34 +175,54 @@ if __name__ == '__main__':
         total_its = min(args.decode_first_K, dataset.test_len())
         with torch.no_grad():
             for idx in tqdm(range(0, total_its), total=total_its):
-                batch = dataset.get_data(idx, 'test')
                 references = dataset.get_reference(idx, 'test')
                 table_id = dataset.get_table_id(idx, 'test')
                 results[table_id] = []
+                override_templates = None
+                # ent_filled = {}
 
-                tmplts = batch[0]
-                batch = tuple(Variable(t).to(device) for t in batch[1:])
-                trg_inp, trg_out, mask, caption = batch
+                while True:
+                    batch = dataset.get_data(idx, 'test', override_templates=override_templates)
+                    tmplts = batch[0]
+                    batch = tuple(Variable(t).to(device) for t in batch[1:])
+                    trg_inp, trg_out, mask, caption = batch
+                    fake_inputs = caption
 
-                temp_res[table_id] = tmplts
+                    samples = sample_sequence_2(model, 50, fake_inputs, [], stop_token=tokenizer.eos_token_id,
+                                                top_k=1, supress=[tokenizer.convert_tokens_to_ids('[SEP]'),
+                                                                  tokenizer.convert_tokens_to_ids('[ENT]')])
 
-                fake_inputs = caption
+                    samples = samples[:, caption.shape[1]:]
+                    samples = samples.cpu().data.numpy()
+                    override_templates = []
+                    intermediate = []
+                    ent_absent_list = []
 
-                # TODO: Run a model-sample-mask loop till all [ENT]s are covered
-                samples = sample_sequence_2(model, 50, fake_inputs, [], stop_token=tokenizer.eos_token_id,
-                                            top_k=1, supress=[tokenizer.convert_tokens_to_ids('[SEP]'),
-                                                              tokenizer.convert_tokens_to_ids('[ENT]')])
+                    for b_idx, s in enumerate(samples):
+                        text = tokenizer.decode(s, clean_up_tokenization_spaces=True)
+                        text = text[: text.find(tokenizer.eos_token)].strip()
+                        text = clean_str([text])[0]
 
-                samples = samples[:, caption.shape[1]:]
-                samples = samples.cpu().data.numpy()
+                        intermediate.append(text)
+                        ent_list = get_ent_vals(tmplts[b_idx], text)
+                        if len(ent_list) == 0:
+                            override_templates.append(text)
+                            ent_absent_list.append(True)
+                            continue
+                        # if b_idx not in ent_filled:
+                        #     ent_filled[b_idx] = [False] * len(ent_list)
+                        # unfilled_ents = [e_idx for e_idx, is_filled in enumerate(ent_filled[b_idx]) if not is_filled]
+                        ent_to_fill = np.random.choice(len(ent_list))
+                        unfilled_ents = [False] * len(ent_list)
+                        unfilled_ents[ent_to_fill] = True
+                        # unfilled_ents[ent_to_fill] = True
+                        # override_templates.append(ent_mask(tmplts[b_idx], text, unfilled_ents[ent_to_fill]))
+                        override_templates.append(ent_mask(tmplts[b_idx], text, unfilled_ents))
 
-                intermediate = []
-                for s in samples:
-                    text = tokenizer.decode(s, clean_up_tokenization_spaces=True)
-                    text = text[: text.find(tokenizer.eos_token)].strip()
-                    intermediate.append(text)
+                    if all(ent_absent_list):
+                        break
 
-                results[table_id] = clean_str(intermediate)
+                results[table_id] = intermediate
 
                 for text in results[table_id]:
                     hypothesis = text.lower().split()

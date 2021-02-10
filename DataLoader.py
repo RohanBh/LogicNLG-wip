@@ -618,7 +618,7 @@ class GPTTableCoarseFineDatabase3(Dataloader):
 
         return inputs, outputs, seq_masks, descs
 
-    def get_data(self, idx, option):
+    def get_data(self, idx, option, override_templates=None):
         table_id, entries = self.obtain_idx(idx, option)
         d = pandas.read_csv('data/all_csv/' + table_id, '#')
 
@@ -629,8 +629,6 @@ class GPTTableCoarseFineDatabase3(Dataloader):
         seq_masks = []
         for e_idx, e in enumerate(entries):
             seqs.append(self.tokenizer.encode(e[0], add_special_tokens=False))
-            # templates.append(e[3])
-            templates.append(self.templates[table_id][e_idx])
             seq_masks.append([1] * len(seqs[-1]))
 
             tmp = ""
@@ -652,9 +650,14 @@ class GPTTableCoarseFineDatabase3(Dataloader):
 
             tmp_prefix = self.tokenizer.tokenize('Given the table title of "{}" . '.format(e[2]))
             tmp_suffix = self.tokenizer.tokenize('Start describing : ')
-            # template = self.tokenizer.tokenize(e[3])
-            # TODO: Call improve template function here
-            template = self.tokenizer.tokenize(self.templates[table_id][e_idx])
+
+            # t_str = e[3]
+            if override_templates is None:
+                t_str = self.templates[table_id][e_idx]
+            else:
+                t_str = override_templates[e_idx]
+            templates.append(t_str)
+            template = self.tokenizer.tokenize(t_str)
             descs.append(self.tokenizer.convert_tokens_to_ids(tmp_prefix + tmp_idx + tmp_suffix + template))
 
         length = max([len(_) for _ in seqs]) + 1
