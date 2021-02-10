@@ -157,9 +157,10 @@ if __name__ == '__main__':
                     '{}/GPT_new_C2F_medium_ep{}.pt'.format(args.id, epoch_idx))
 
     if args.do_test:
-        dataset = GPTTableCoarseFineDatabase3(None, None, 'data/test_lm.json', tokenizer, args.batch_size, args.max_len,
-                                              args.stage)
-        model.load_state_dict(torch.load(args.load_from))
+        dataset = GPTTableCoarseFineDatabase3(None, None, 'data/test_lm.json', tokenizer,
+                                              args.batch_size, args.max_len,
+                                              template_json='data/test_lm_template.json')
+        model.load_state_dict(torch.load(args.load_from)['model_state_dict'])
         model.eval()
 
         sent_bleus_1 = []
@@ -169,15 +170,17 @@ if __name__ == '__main__':
         results = {}
         temp_res = {}
         start_time = time.time()
+        total_its = min(args.decode_first_K, dataset.test_len())
         with torch.no_grad():
-            for idx in range(0, min(args.decode_first_K, dataset.test_len())):
+            for idx in tqdm(range(0, total_its), total=total_its):
                 batch = dataset.get_data(idx, 'test')
                 references = dataset.get_reference(idx, 'test')
                 table_id = dataset.get_table_id(idx, 'test')
                 results[table_id] = []
 
-                batch = tuple(Variable(t).to(device) for t in batch)
-                tmplts, trg_inp, trg_out, mask, caption = batch
+                tmplts = batch[0]
+                batch = tuple(Variable(t).to(device) for t in batch[1:])
+                trg_inp, trg_out, mask, caption = batch
 
                 temp_res[table_id] = tmplts
 
@@ -212,7 +215,7 @@ if __name__ == '__main__':
                 bleu_2 = format((sum(sent_bleus_2) / len(sent_bleus_2) * 100), '.2f')
                 bleu_3 = format((sum(sent_bleus_3) / len(sent_bleus_3) * 100), '.2f')
 
-                sys.stdout.write(
+                tqdm.write(
                     "finished {}/{}; BLEU score {}/{}/{}; speed={}s/sent \r".format(
                         idx, dataset.test_len(), bleu_1, bleu_2, bleu_3,
                         (time.time() - start_time) / len(sent_bleus_1)))

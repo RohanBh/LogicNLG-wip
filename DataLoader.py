@@ -553,11 +553,15 @@ class GPTTableCoarseFineDatabase2(Dataloader):
 
 class GPTTableCoarseFineDatabase3(Dataloader):
     def __init__(self, train_name, val_name, test_name, tokenizer, batch_size=5, max_len=800,
-                 window_size=15, random_sampling=10):
+                 window_size=15, random_sampling=10, template_json=None):
         super(GPTTableCoarseFineDatabase3, self).__init__(None, val_name, test_name)
         if train_name:
             with open(train_name, 'r') as f:
                 self.train = json.load(f)
+
+        if template_json:
+            with open(template_json, 'r') as f:
+                self.templates = json.load(f)
 
         self.tokenizer = tokenizer
         self.batch_size = batch_size
@@ -623,9 +627,10 @@ class GPTTableCoarseFineDatabase3(Dataloader):
         descs = []
         templates = []
         seq_masks = []
-        for e in entries:
+        for e_idx, e in enumerate(entries):
             seqs.append(self.tokenizer.encode(e[0], add_special_tokens=False))
-            templates.append(e[3])
+            # templates.append(e[3])
+            templates.append(self.templates[table_id][e_idx])
             seq_masks.append([1] * len(seqs[-1]))
 
             tmp = ""
@@ -647,8 +652,9 @@ class GPTTableCoarseFineDatabase3(Dataloader):
 
             tmp_prefix = self.tokenizer.tokenize('Given the table title of "{}" . '.format(e[2]))
             tmp_suffix = self.tokenizer.tokenize('Start describing : ')
-            # TODO: Remove template from the test data. The template will be generated from the GPT2_C2F
-            template = self.tokenizer.tokenize(e[3])
+            # template = self.tokenizer.tokenize(e[3])
+            # TODO: Call improve template function here
+            template = self.templates[table_id][e_idx]
             descs.append(self.tokenizer.convert_tokens_to_ids(tmp_prefix + tmp_idx + tmp_suffix + template))
 
         length = max([len(_) for _ in seqs]) + 1
