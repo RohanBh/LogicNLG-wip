@@ -2,3 +2,11 @@
 *pyc
 .idea/
 data/train_lm_new.json
+NLI_models.zip
+NLI_models/
+data/all_csv/
+models.zip
+models/
+parser_models.zip
+parser_models/
+tensorboard/*

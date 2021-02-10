@@ -614,6 +614,63 @@ class GPTTableCoarseFineDatabase3(Dataloader):
 
         return inputs, outputs, seq_masks, descs
 
+    def get_data(self, idx, option):
+        table_id, entries = self.obtain_idx(idx, option)
+        d = pandas.read_csv('data/all_csv/' + table_id, '#')
+
+        columns = d.columns
+        seqs = []
+        descs = []
+        templates = []
+        seq_masks = []
+        for e in entries:
+            seqs.append(self.tokenizer.encode(e[0], add_special_tokens=False))
+            templates.append(e[3])
+            seq_masks.append([1] * len(seqs[-1]))
+
+            tmp = ""
+            for i in range(len(d)):
+                tmp += 'In row {} , '.format(i + 1)
+                for _ in e[1]:
+                    if isinstance(d.iloc[i][columns[_]], str):
+                        entity = map(lambda x: x.capitalize(), d.iloc[i][columns[_]].split(' '))
+                        entity = ' '.join(entity)
+                    else:
+                        entity = str(d.iloc[i][columns[_]])
+
+                    tmp += 'the {} is {} , '.format(columns[_], entity)
+                tmp = tmp[:-3] + ' . '
+
+            tmp_idx = self.tokenizer.tokenize(tmp)
+            if len(tmp_idx) > self.max_len:
+                tmp_idx = tmp_idx[:self.max_len]
+
+            tmp_prefix = self.tokenizer.tokenize('Given the table title of "{}" . '.format(e[2]))
+            tmp_suffix = self.tokenizer.tokenize('Start describing : ')
+            # TODO: Remove template from the test data. The template will be generated from the GPT2_C2F
+            template = self.tokenizer.tokenize(e[3])
+            descs.append(self.tokenizer.convert_tokens_to_ids(tmp_prefix + tmp_idx + tmp_suffix + template))
+
+        length = max([len(_) for _ in seqs]) + 1
+        for i in range(len(seqs)):
+            seqs[i] += (length - len(seqs[i])) * [self.tokenizer.eos_token_id]
+            seq_masks[i] = seq_masks[i] + [1] + (length - len(seq_masks[i]) - 1) * [0]
+        seqs = torch.LongTensor(seqs)
+        seq_masks = torch.FloatTensor(seq_masks)
+
+        length = max([len(_) for _ in descs]) + 1
+        for i in range(len(descs)):
+            descs[i] = (length - len(descs[i])) * [self.tokenizer.eos_token_id] + descs[i]
+        descs = torch.LongTensor(descs)
+
+        inputs = seqs[:, :-1]
+        outputs = seqs
+
+        # if details:
+        #     return inputs, outputs, seq_masks, descs, d, [_[1] for _ in entries], [_[2] for _ in entries]
+        # else:
+        return templates, inputs, outputs, seq_masks, descs
+
 
 class GPTTableDataset2(Dataset):
     def __init__(self, train_name, tokenizer, max_len):

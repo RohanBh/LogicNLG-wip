@@ -15,7 +15,7 @@ from tqdm.auto import tqdm
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
 from DataLoader import *
-from utils import sample_sequence
+from utils import sample_sequence_2
 
 device = torch.device('cuda')
 
@@ -157,8 +157,7 @@ if __name__ == '__main__':
                     '{}/GPT_new_C2F_medium_ep{}.pt'.format(args.id, epoch_idx))
 
     if args.do_test:
-        assert 'stage2' in args.load_from, "The testing can only be done with stage2 model"
-        dataset = GPTTableCoarseFineDatabase2(None, None, 'data/test_lm.json', tokenizer, args.batch_size, args.max_len,
+        dataset = GPTTableCoarseFineDatabase3(None, None, 'data/test_lm.json', tokenizer, args.batch_size, args.max_len,
                                               args.stage)
         model.load_state_dict(torch.load(args.load_from))
         model.eval()
@@ -168,6 +167,7 @@ if __name__ == '__main__':
         sent_bleus_3 = []
 
         results = {}
+        temp_res = {}
         start_time = time.time()
         with torch.no_grad():
             for idx in range(0, min(args.decode_first_K, dataset.test_len())):
@@ -177,15 +177,16 @@ if __name__ == '__main__':
                 results[table_id] = []
 
                 batch = tuple(Variable(t).to(device) for t in batch)
-                trg_inp, trg_out, mask, caption = batch
+                tmplts, trg_inp, trg_out, mask, caption = batch
+
+                temp_res[table_id] = tmplts
 
                 fake_inputs = caption
 
-                samples = sample_sequence(model, 50, fake_inputs, [], stop_token=tokenizer.eos_token_id,
-                                          top_k=1, trigger=tokenizer.convert_tokens_to_ids('[SEP]'),
-                                          supress=[tokenizer.convert_tokens_to_ids('[SEP]'),
-                                                   tokenizer.convert_tokens_to_ids('[ENT]')],
-                                          repetition=tokenizer.convert_tokens_to_ids('[ENT]'))
+                # TODO: Run a model-sample-mask loop till all [ENT]s are covered
+                samples = sample_sequence_2(model, 50, fake_inputs, [], stop_token=tokenizer.eos_token_id,
+                                            top_k=1, supress=[tokenizer.convert_tokens_to_ids('[SEP]'),
+                                                              tokenizer.convert_tokens_to_ids('[ENT]')])
 
                 samples = samples[:, caption.shape[1]:]
                 samples = samples.cpu().data.numpy()
@@ -193,8 +194,7 @@ if __name__ == '__main__':
                 intermediate = []
                 for s in samples:
                     text = tokenizer.decode(s, clean_up_tokenization_spaces=True)
-                    text = text[text.find('[SEP]') + 6: text.find(tokenizer.eos_token)].strip()
-                    # text = text[: text.find(tokenizer.eos_token)]
+                    text = text[: text.find(tokenizer.eos_token)].strip()
                     intermediate.append(text)
 
                 results[table_id] = clean_str(intermediate)
@@ -219,8 +219,11 @@ if __name__ == '__main__':
 
             print("total corpus BLEU score = {}/{}/{}".format(bleu_1, bleu_2, bleu_3))
 
-        with open('outputs/GPT_{}_C2F_{}.json'.format(args.model, bleu_3), 'w') as f:
+        with open('outputs/GPT_new_{}_C2F_{}_res.json'.format(args.model, bleu_3), 'w') as f:
             json.dump(results, f, indent=2)
+
+        with open('outputs/GPT_new_{}_C2F_{}_tmp.json'.format(args.model, bleu_3), 'w') as f:
+            json.dump(temp_res, f, indent=2)
 
     if args.do_verify:
         assert 'stage2' in args.load_from, "The testing can only be done with stage2 model"
