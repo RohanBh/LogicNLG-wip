@@ -1,4 +1,5 @@
 import copy
+import itertools
 import json
 import random
 import re
@@ -686,7 +687,8 @@ class GPTTableCoarseFineDatabase3(Dataloader):
 
 
 class GPTSentenceMaskEnv:
-    def __init__(self, train_name, tokenizer, scorer, batch_size=1, max_len=800, n_actions=10, device='cpu'):
+    def __init__(self, train_name, tokenizer, scorer, batch_size=1, max_len=800, n_actions=10,
+                 device=torch.device('cpu')):
         if train_name:
             with open(train_name, 'r') as f:
                 self.train = json.load(f)
@@ -700,7 +702,7 @@ class GPTSentenceMaskEnv:
         self.n_actions = n_actions
         self.device = device
 
-        self.train_indices = list(range(len(self.train)))
+        self.train_indices = list(itertools.product(list(self.train.keys()), list(range(5))))
         random.shuffle(self.train_indices)
         self.curr_idx = 0
         self.curr_entry, self.filled_txt, self.yt, self.ent_list, self._state, self._full_template = [None] * 6
@@ -733,7 +735,7 @@ class GPTSentenceMaskEnv:
 
     def _fill_template(self, table_desc, table_title, yt):
         caption = self.get_caption_ids(table_desc, table_title, yt)
-        filled_sentence = sample_sequence_2(self.template_filler, 30, caption, [],
+        filled_sentence = sample_sequence_2(self.template_filler, 100, caption, [],
                                             stop_token=self.tokenizer.eos_token_id, top_k=1,
                                             supress=[self.tokenizer.convert_tokens_to_ids('[SEP]'),
                                                      self.tokenizer.convert_tokens_to_ids('[ENT]')])
@@ -757,13 +759,10 @@ class GPTSentenceMaskEnv:
         try:
             ent_list = get_ent_vals(yt, text)
         except ValueError as e:
-            ent_list = []
-            # error_set.add((str(e), tmplts[b_idx], text))
-            # Handle this
-            raise e
+            return [None] * 4
 
         if len(ent_list) == 0:
-            return None
+            return '', '', '', ent_list
 
         new_y = []
         ent_ix = 0
@@ -792,9 +791,9 @@ class GPTSentenceMaskEnv:
                 ent_tok_idx = tok_idx
                 break
         if ent_tok_idx == -1:
-            raise ValueError("[ENT] token not found!")
+            return None
         caption = self.get_caption_ids(table_desc, table_title, yt)
-        probs = sample_sequence_get_prob(self.template_filler, ent_tok_idx, 30, caption, [],
+        probs = sample_sequence_get_prob(self.template_filler, ent_tok_idx, 100, caption, [],
                                          stop_token=self.tokenizer.eos_token_id, top_k=1,
                                          supress=[self.tokenizer.convert_tokens_to_ids('[SEP]'),
                                                   self.tokenizer.convert_tokens_to_ids('[ENT]')])
@@ -803,7 +802,8 @@ class GPTSentenceMaskEnv:
         return probs[chosen_token_id]
 
     def reset(self):
-        self.curr_entry = self.train[self.train_indices[self.curr_idx]]
+        tid, eid = self.train_indices[self.curr_idx]
+        self.curr_entry = self.train[tid][eid]
         self.curr_idx += 1
         ent_list = get_ent_vals(self.curr_entry[3], self.curr_entry[0])
         self._full_template = self.curr_entry[3]
@@ -816,9 +816,9 @@ class GPTSentenceMaskEnv:
 
         state, filled_txt, yt, ent_list = self._fill_template(
             self.curr_entry[-1], self.curr_entry[2], self._full_template)
-        self._update(filled_txt, yt, ent_list, state)
-        self.ent2ogidx = {i: i for i in range(len(ent_list))}
         if state is not None:
+            self._update(filled_txt, yt, ent_list, state)
+            self.ent2ogidx = {i: i for i in range(len(ent_list))}
             return state
         return self.reset()
 
@@ -841,10 +841,13 @@ class GPTSentenceMaskEnv:
         state, filled_txt, yt, ent_list = self._fill_template(
             self.curr_entry[-1], self.curr_entry[2], new_yt)
         self._update(filled_txt, yt, ent_list, state)
-
-        reward = self._compute_reward(
-            ent_to_fill, self.curr_entry[-1], self.curr_entry[2], self._full_template, self.curr_entry[0])
-        return state, reward, len(self.ent_list) == 0, None
+        if state is not None:
+            reward = self._compute_reward(
+                ent_to_fill, self.curr_entry[-1], self.curr_entry[2], self._full_template, self.curr_entry[0])
+            if reward is not None:
+                return state, reward, len(self.ent_list) == 0, None
+            return state, 0, True, None
+        return state, 0, True, None
 
 
 class GPTTableDataset2(Dataset):

@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.autograd import Variable
 from transformers import BertModel, GPT2Model, GPT2Tokenizer
 
 
@@ -483,8 +484,10 @@ class BERTRanker(nn.Module):
 
 
 class ActorCritic(nn.Module):
-    def __init__(self, n_actions=10):
+    def __init__(self, n_actions=10, device=torch.device('cpu')):
         super(ActorCritic, self).__init__()
+        self.device = device
+
         self.gpt2 = GPT2Model.from_pretrained("gpt2")
         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
         self.tokenizer.add_tokens(['[ENT]', '[M1]', '[M2]'])
@@ -496,13 +499,14 @@ class ActorCritic(nn.Module):
         self.l2 = nn.Linear(self.gpt2.config.n_embd, 1, bias=False)
         return
 
-    def __forward__(self, state):
+    def forward(self, state):
         # Remember to pad x on the left
         # batch_size = 1
-        # x - batch_size x seq_len x hidden_size
-        input_ids = self.tokenizer.encode(state)
-        x = self.gpt2(input_ids=input_ids)
-        x = x[:, -1, :]
+        # x - seq_len x hidden_size
+        input_ids = torch.LongTensor(self.tokenizer.encode(state))
+        input_ids = Variable(input_ids).to(self.device)
+        x = self.gpt2(input_ids=input_ids)[0]
+        x = x[-1, :]
         # batch_size x n_actions
         logits = self.l1(x)
         prob = torch.softmax(logits, -1)

@@ -189,7 +189,6 @@ if __name__ == '__main__':
 
         for i in tqdm(range(args.episodes), total=args.episodes):
             state = env.reset()
-            state = Variable(state).to(device)
             done = False
             score = 0
             step_idx = 1
@@ -199,11 +198,14 @@ if __name__ == '__main__':
                 action = action_probs.sample()
 
                 next_state, reward, done, _ = env.step(action)
-                next_state = Variable(next_state).to(device)
                 done = done or step_idx >= args.max_steps
                 score += reward
 
-                _, next_state_value = actor_critic(next_state)
+                if not done:
+                    _, next_state_value = actor_critic(next_state)
+                else:
+                    next_state_value = 0
+
                 log_prob = action_probs.log_prob(action)
                 delta = reward + args.gamma * next_state_value * (1 - int(done)) - state_value
                 actor_loss = -log_prob * delta
