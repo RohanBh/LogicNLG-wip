@@ -484,22 +484,22 @@ class BERTRanker(nn.Module):
 
 
 class ActorCritic(nn.Module):
-    def __init__(self, n_actions=10, device=torch.device('cpu')):
+    def __init__(self, n_actions=10, device=torch.device('cpu'), in_eval=False):
         super(ActorCritic, self).__init__()
+        self.n_actions = n_actions
         self.device = device
+        self.in_eval = in_eval
 
         self.gpt2 = GPT2Model.from_pretrained("gpt2")
         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
         self.tokenizer.add_tokens(['[ENT]', '[M1]', '[M2]'])
         self.gpt2.resize_token_embeddings(len(self.tokenizer))
 
-        self.n_actions = n_actions
-
         self.l1 = nn.Linear(self.gpt2.config.n_embd, self.n_actions, bias=False)
         self.l2 = nn.Linear(self.gpt2.config.n_embd, 1, bias=False)
         return
 
-    def forward(self, state):
+    def forward(self, state, legal_actions=10):
         # Remember to pad x on the left
         # batch_size = 1
         # x - seq_len x hidden_size
@@ -507,7 +507,9 @@ class ActorCritic(nn.Module):
         input_ids = Variable(input_ids).to(self.device)
         x = self.gpt2(input_ids=input_ids)[0]
         x = x[-1, :]
-        # batch_size x n_actions
-        logits = self.l1(x)
+        # shape - (n_actions, )
+        logits = self.l1(x).cpu()
+        if self.in_eval and legal_actions < self.n_actions:
+            logits[legal_actions:] = -float('Inf')
         prob = torch.softmax(logits, -1)
-        return prob, self.l2(x)
+        return prob, self.l2(x).cpu()

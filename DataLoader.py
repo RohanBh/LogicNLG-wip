@@ -809,7 +809,7 @@ class GPTSentenceMaskEnv:
         self.curr_idx += 1
         self.curr_entry = self.train[tid][eid]
 
-        # limit the number of entitiies we have to fill in one episode
+        # limit the number of entities we have to fill in one episode
         try:
             ent_list_og = get_ent_vals(self.curr_entry[3], self.curr_entry[0])
         except ValueError as e:

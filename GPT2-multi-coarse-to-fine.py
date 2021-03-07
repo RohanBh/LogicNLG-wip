@@ -42,7 +42,10 @@ if __name__ == '__main__':
     parser.add_argument('--gamma', default=0.99, type=float, help="Discounting factor")
     parser.add_argument('--max_steps', default=15, type=int, help="Maximum steps allowed")
     parser.add_argument('--save_every', default=500, type=int, help="save every n episodes")
-    parser.add_argument('--start_episode', default=0, type=int, help="The episode to resume training")
+    parser.add_argument('--start_episode', default=1, type=int, help="The episode to resume training")
+    parser.add_argument('--load_from_rl', default='', type=str, help="Load RL actor-critic model from this path")
+    parser.add_argument('--do_test_rl', default=False, action="store_true",
+                        help="Compute bleu-1/2/3 and save the decoded results for RL model")
 
     parser.add_argument('--do_test', default=False, action="store_true",
                         help="Compute bleu-1/2/3 and save the decoded results")
@@ -71,7 +74,7 @@ if __name__ == '__main__':
     if args.model == 'gpt2-medium':
         args.batch_size = 2
 
-    if args.do_rl:
+    if args.do_rl or args.do_test_rl:
         args.batch_size = 1
 
     print(args)
@@ -97,10 +100,10 @@ if __name__ == '__main__':
                                               random_sampling=args.random_sampling)
 
         model.train()
-        # optimizer = optim.Adam(model.parameters(), args.learning_rate)
-        optimizer = AdamW(model.parameters(), lr=args.learning_rate)
-        scheduler = get_linear_schedule_with_warmup(
-            optimizer, num_warmup_steps=1000, num_training_steps=35000)
+        optimizer = optim.Adam(model.parameters(), args.learning_rate)
+        # optimizer = AdamW(model.parameters(), lr=args.learning_rate)
+        # scheduler = get_linear_schedule_with_warmup(
+        #     optimizer, num_warmup_steps=1000, num_training_steps=35000)
 
         avg_loss = 0
         global_step = 0
@@ -108,7 +111,7 @@ if __name__ == '__main__':
             checkpoint = torch.load('{}/GPT_new_C2F_ep{}.pt'.format(args.id, args.start_epoch - 1))
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            # scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
         for epoch_idx in range(args.start_epoch, args.start_epoch + args.epoch):
             print("start training {}th epoch".format(epoch_idx))
@@ -133,7 +136,7 @@ if __name__ == '__main__':
 
                 loss.backward()
                 optimizer.step()
-                scheduler.step()
+                # scheduler.step()
                 global_step += 1
 
                 if idx % args.every == 0 and idx > 0:
@@ -163,7 +166,7 @@ if __name__ == '__main__':
                     'epoch': epoch_idx,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
-                    'scheduler_state_dict': scheduler.state_dict()
+                    # 'scheduler_state_dict': scheduler.state_dict()
                 },
                     '{}/GPT_new_C2F_ep{}.pt'.format(args.id, epoch_idx))
             else:
@@ -188,7 +191,8 @@ if __name__ == '__main__':
 
         optimizer = optim.Adam(actor_critic.parameters(), args.learning_rate)
 
-        env = GPTSentenceMaskEnv('data/val_lm_improved.json', tokenizer, scorer, device=args.device)
+        env = GPTSentenceMaskEnv('data/val_lm_improved.json', tokenizer, scorer,
+                                 device=args.device, n_actions=args.n_actions, max_len=args.max_len)
 
         best_score = 0
         avg_loss_1 = 0
@@ -198,8 +202,8 @@ if __name__ == '__main__':
         score_history = []
         ep_len_history = []
 
-        if args.start_episode != 0:
-            checkpoint = torch.load('{}/GPT_RL_episode_{}.pt'.format(args.id, args.start_episode))
+        if args.start_episode != 1:
+            checkpoint = torch.load('{}/GPT_RL_episode_{:05}.pt'.format(args.id, args.start_episode))
             actor_critic.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
@@ -375,6 +379,134 @@ if __name__ == '__main__':
 
         # with open('outputs/GPT_new_{}_C2F_{}_tmp.json'.format(args.model, bleu_3), 'w') as f:
         #     json.dump(temp_res, f, indent=2)
+
+
+    if args.do_test_rl:
+        dataset = GPTTableCoarseFineDatabase3(None, None, 'data/test_lm.json', tokenizer,
+                                              args.batch_size, args.max_len,
+                                              template_json='data/test_lm_template.json')
+        scorer = model
+        scorer.load_state_dict(torch.load(args.load_from)['model_state_dict'])
+        scorer.eval()
+
+        actor_critic = ActorCritic(n_actions=args.n_actions, device=args.device, in_eval=True)
+        actor_critic = nn.DataParallel(actor_critic)
+        actor_critic.to(args.device)
+        actor_critic.load_state_dict(torch.load(args.load_from_rl)['model_state_dict'])
+        actor_critic.eval()
+
+        sent_bleus_1 = []
+        sent_bleus_2 = []
+        sent_bleus_3 = []
+
+        results = {}
+        # temp_res = {}
+        start_time = time.time()
+        total_its = min(args.decode_first_K, dataset.test_len())
+        error_set = set()
+        with torch.no_grad():
+            for idx in tqdm(range(0, total_its), total=total_its):
+                references = dataset.get_reference(idx, 'test')
+                table_id = dataset.get_table_id(idx, 'test')
+                results[table_id] = []
+                override_templates = None
+                # ent_filled = {}
+
+                while True:
+                    batch = dataset.get_data(idx, 'test', override_templates=override_templates)
+                    tmplts = batch[0]
+                    batch = tuple(Variable(t).to(device) for t in batch[1:])
+                    trg_inp, trg_out, mask, caption = batch
+                    fake_inputs = caption
+
+                    samples = sample_sequence_2(model, 70, fake_inputs, [], stop_token=tokenizer.eos_token_id,
+                                                top_k=1, supress=[tokenizer.convert_tokens_to_ids('[SEP]'),
+                                                                  tokenizer.convert_tokens_to_ids('[ENT]')])
+
+                    samples = samples[:, caption.shape[1]:]
+                    samples = samples.cpu().data.numpy()
+                    override_templates = []
+                    intermediate = []
+                    ent_absent_list = []
+
+                    for b_idx, s in enumerate(samples):
+                        text = tokenizer.decode(s, clean_up_tokenization_spaces=True)
+                        text = text[: text.find(tokenizer.eos_token)].strip()
+                        text = clean_str([text])[0]
+
+                        intermediate.append(text)
+                        try:
+                            ent_list = get_ent_vals(tmplts[b_idx], text)
+                        except ValueError as e:
+                            ent_list = []
+                            error_set.add((str(e), tmplts[b_idx], text))
+                        if len(ent_list) == 0:
+                            override_templates.append(text)
+                            ent_absent_list.append(True)
+                            continue
+                        # if b_idx not in ent_filled:
+                        #     ent_filled[b_idx] = [False] * len(ent_list)
+                        # unfilled_ents = [e_idx for e_idx, is_filled in enumerate(ent_filled[b_idx]) if not is_filled]
+                        num_ents_to_fill = count_ent_1(tmplts[b_idx])
+                        if num_ents_to_fill > args.n_actions:
+                            ent_to_fill = np.random.choice(len(ent_list))
+                        else:
+                            # Do better than a random choice
+                            # Create a state for the actor critic
+                            state = []
+                            ent_ix = 0
+                            for w in tmplts[b_idx].split(' '):
+                                if w == '[ENT]':
+                                    state.append('[M1]')
+                                    state.append(ent_list[ent_ix])
+                                    state.append('[M2]')
+                                    ent_ix += 1
+                                else:
+                                    state.append(w)
+                            # Add the knowledge of total actions
+                            state.append(str(num_ents_to_fill))
+                            state = ' '.join(state)
+                            # Limit the action outcome + For #entities > num_actions, take a random action for now
+                            probs, _ = actor_critic(state, legal_actions=num_ents_to_fill)
+                            ent_to_fill = torch.argmax(probs, dim=-1).item()
+
+                        unfilled_ents = [False] * len(ent_list)
+                        unfilled_ents[ent_to_fill] = True
+                        # unfilled_ents[ent_to_fill] = True
+                        # override_templates.append(ent_mask(tmplts[b_idx], text, unfilled_ents[ent_to_fill]))
+                        override_templates.append(ent_mask(tmplts[b_idx], text, unfilled_ents))
+
+                    if all(ent_absent_list):
+                        break
+
+                results[table_id] = intermediate
+
+                for text in results[table_id]:
+                    hypothesis = text.lower().split()
+                    sent_bleus_1.append(nltk.translate.bleu_score.sentence_bleu(
+                        references, hypothesis, weights=(1, 0, 0)))
+                    sent_bleus_2.append(nltk.translate.bleu_score.sentence_bleu(
+                        references, hypothesis, weights=(0.5, 0.5, 0)))
+                    sent_bleus_3.append(nltk.translate.bleu_score.sentence_bleu(
+                        references, hypothesis, weights=(0.33, 0.33, 0.33)))
+
+                bleu_1 = format((sum(sent_bleus_1) / len(sent_bleus_1) * 100), '.2f')
+                bleu_2 = format((sum(sent_bleus_2) / len(sent_bleus_2) * 100), '.2f')
+                bleu_3 = format((sum(sent_bleus_3) / len(sent_bleus_3) * 100), '.2f')
+
+                tqdm.write(
+                    "finished {}/{}; BLEU score {}/{}/{}; speed={}s/sent \r".format(
+                        idx, dataset.test_len(), bleu_1, bleu_2, bleu_3,
+                        (time.time() - start_time) / len(sent_bleus_1)))
+
+            print("total corpus BLEU score = {}/{}/{}".format(bleu_1, bleu_2, bleu_3))
+
+        with open('outputs/GPT_new_{}_C2F_{}_res.json'.format(args.model, bleu_3), 'w') as f:
+            json.dump(results, f, indent=2)
+
+        with open('outputs/GPT_new_{}_C2F_{}_error.json'.format(args.model, bleu_3), 'w') as f:
+            json.dump(list(error_set), f, indent=2)
+
 
     if args.do_verify:
         assert 'stage2' in args.load_from, "The testing can only be done with stage2 model"
