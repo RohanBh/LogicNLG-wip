@@ -131,6 +131,51 @@ def sample_sequence_2(model, length, context, args, num_samples=1, temperature=1
     return generated
 
 
+def sample_sequence_get_prob(model, ent_tok_idx, length, context, args, num_samples=1, temperature=1, stop_token=None,
+                             supress=None, top_k=0, top_p=0.0, device='cuda'):
+    if isinstance(context, list):
+        context = torch.tensor(context, dtype=torch.long, device=device)
+        context = context.unsqueeze(0).repeat(num_samples, 1)
+
+    generated = context
+    batch_size = generated.shape[0]
+
+    finished_sentence = [False for _ in range(batch_size)]
+    with torch.no_grad():
+        for i in range(length):
+            outputs = model(generated, *args)
+            if isinstance(outputs, list) or isinstance(outputs, tuple):
+                next_token_logits = outputs[0][:, -1, :] / (temperature if temperature > 0 else 1.)
+            else:
+                next_token_logits = outputs[:, -1, :] / (temperature if temperature > 0 else 1.)
+
+            # Once the template generation phase is over, don't generate suppress tokens
+            if supress is not None:
+                for b in range(batch_size):
+                    next_token_logits[b, supress] = -float('Inf')
+
+            if i == ent_tok_idx:
+                return F.softmax(next_token_logits, dim=-1)[0]
+
+            filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p)
+
+            if temperature == 0:  # greedy sampling:
+                next_token = torch.argmax(filtered_logits, dim=-1).unsqueeze(-1)
+            else:
+                next_token = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=1)
+
+            for b in range(batch_size):
+                if next_token[b].item() == stop_token:
+                    finished_sentence[b] = True
+
+            generated = torch.cat((generated, next_token), dim=1)
+
+            if all(finished_sentence):
+                break
+
+    return generated
+
+
 def powerset(iterable):
     "powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
     s = list(iterable)

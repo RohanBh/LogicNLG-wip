@@ -3,6 +3,7 @@ import json
 
 import numpy as np
 from tqdm.auto import tqdm
+import pandas as pd
 
 from utils import powerset
 
@@ -188,7 +189,7 @@ def _duplicate_entry(entry):
     return entries
 
 
-def create_new_json():
+def create_new_json_1():
     train_name = 'data/train_lm_preprocessed.json'
     with open(train_name, 'r') as f:
         train_data = json.load(f)
@@ -202,6 +203,58 @@ def create_new_json():
     return
 
 
+def create_new_json_2():
+    train_name = 'data/train_lm_preprocessed.json'
+    with open(train_name, 'r') as f:
+        train_data = json.load(f)
+
+    new_train_data = []
+    for idx in tqdm(range(len(train_data)), total=len(train_data)):
+        e = train_data[idx]
+        e[3] = improve_yt(e[3])
+        new_train_data.append(e)
+
+    with open('data/train_lm_improved.json', 'w') as f:
+        json.dump(new_train_data, f, indent=2)
+
+    return
+
+
+def create_new_json_3():
+    train_name = 'data/val_lm.json'
+    with open(train_name, 'r') as f:
+        train_data = json.load(f)
+
+    new_data = {}
+    for table_id, entries in tqdm(train_data.items(), total=len(train_data)):
+        new_data[table_id] = []
+
+        d = pd.read_csv('data/all_csv/' + table_id, '#')
+        columns = d.columns
+
+        for e_idx, e in enumerate(entries):
+            tmp = ""
+            for i in range(len(d)):
+                tmp += 'In row {} , '.format(i + 1)
+                for _ in e[1]:
+                    if isinstance(d.iloc[i][columns[_]], str):
+                        entity = map(lambda x: x.capitalize(), d.iloc[i][columns[_]].split(' '))
+                        entity = ' '.join(entity)
+                    else:
+                        entity = str(d.iloc[i][columns[_]])
+
+                    tmp += 'the {} is {} , '.format(columns[_], entity)
+                tmp = tmp[:-3] + ' . '
+
+            new_data[table_id].append(copy.copy(e))
+            new_data[table_id][-1].append(tmp)
+            new_data[table_id][-1][3] = improve_yt(e[3])
+
+    with open('data/val_lm_improved.json', 'w') as f:
+        json.dump(new_data, f, indent=2)
+    return
+
+
 def ent_2_stats():
     train_name = 'data/train_lm_new.json'
     with open(train_name, 'r') as f:
@@ -211,22 +264,23 @@ def ent_2_stats():
     for entry in tqdm(train_data):
         template = entry[3]
         ent_dist.append(count_ent_1(template))
-
-    tqdm.write(f"#ENT Percentiles: {np.percentile(ent_dist, [0, 25, 50, 75, 80, 95, 100])}")
+    pctl_list = [0, 25, 50, 75, 80, 90, 95, 97, 99, 100]
+    tqdm.write(f"#ENT Percentiles: {dict(zip(pctl_list, np.percentile(ent_dist, pctl_list)))}")
+    tqdm.write(f"mean_num_ents {np.mean(ent_dist)}")
 
     ent_len_dist = []
     for entry in tqdm(train_data):
         template = entry[3]
         ent_len_dist.append(len(template.split(' ')))
-    tqdm.write(f"Sentence length Percentiles: {np.percentile(ent_len_dist, [0, 25, 50, 75, 80, 95, 100])}")
-    tqdm.write(f"mean {np.mean(ent_len_dist)}")
+    tqdm.write(f"Sentence length Percentiles: {dict(zip(pctl_list, np.percentile(ent_len_dist, pctl_list)))}")
+    tqdm.write(f"mean_len {np.mean(ent_len_dist)}")
     return
 
 
 if __name__ == '__main__':
     # comp_data_len_1()
     # comp_data_len_2()
-    # create_new_json()
+    # create_new_json_1()
 
     # with open('data/train_lm.json', 'r') as f:
     #     train_data = json.load(f)
@@ -236,4 +290,7 @@ if __name__ == '__main__':
     #     train_data = json.load(f)
     #     print(f"Total Entries: {len(train_data)}")
 
-    ent_2_stats()
+    # ent_2_stats()
+
+    # create_new_json_2()
+    create_new_json_3()

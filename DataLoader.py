@@ -1,10 +1,14 @@
 import copy
 import json
 import random
+import re
 
 import pandas
 import torch
 from torch.utils.data import Dataset
+
+from gen_new_data import get_ent_vals, ent_mask
+from utils import sample_sequence_2, sample_sequence_get_prob
 
 
 class Dataloader(object):
@@ -679,6 +683,168 @@ class GPTTableCoarseFineDatabase3(Dataloader):
         #     return inputs, outputs, seq_masks, descs, d, [_[1] for _ in entries], [_[2] for _ in entries]
         # else:
         return templates, inputs, outputs, seq_masks, descs
+
+
+class GPTSentenceMaskEnv:
+    def __init__(self, train_name, tokenizer, scorer, batch_size=1, max_len=800, n_actions=10, device='cpu'):
+        if train_name:
+            with open(train_name, 'r') as f:
+                self.train = json.load(f)
+
+        self.tokenizer = tokenizer
+        self.scorer = scorer
+        # scorer model is the same as template filler model
+        self.template_filler = scorer
+        self.batch_size = batch_size
+        self.max_len = max_len
+        self.n_actions = n_actions
+        self.device = device
+
+        self.train_indices = list(range(len(self.train)))
+        random.shuffle(self.train_indices)
+        self.curr_idx = 0
+        self.curr_entry, self.filled_txt, self.yt, self.ent_list, self._state, self._full_template = [None] * 6
+        self.ent2ogidx = {}
+        self.reset()
+
+    def train_len(self):
+        return len(self.train)
+
+    def _update(self, filled_txt, yt, ent_list, state):
+        self.filled_txt = filled_txt
+        self.yt = yt
+        self.ent_list = ent_list
+        self._state = state
+
+    def get_caption_ids(self, table_desc, table_title, yt):
+        tmp_idx = self.tokenizer.tokenize(table_desc)
+        if len(tmp_idx) > self.max_len:
+            tmp_idx = tmp_idx[:self.max_len]
+
+        tmp_prefix = self.tokenizer.tokenize('Given the table title of "{}" . '.format(table_title))
+        tmp_suffix = self.tokenizer.tokenize('Start describing : ')
+        template = self.tokenizer.tokenize(yt)
+        caption = self.tokenizer.convert_tokens_to_ids(tmp_prefix + tmp_idx + tmp_suffix + template)
+
+        caption = [self.tokenizer.eos_token_id] + caption
+        caption = torch.LongTensor(caption).unsqueeze(0)
+        caption = torch.autograd.Variable(caption).to(self.device)
+        return caption
+
+    def _fill_template(self, table_desc, table_title, yt):
+        caption = self.get_caption_ids(table_desc, table_title, yt)
+        filled_sentence = sample_sequence_2(self.template_filler, 30, caption, [],
+                                            stop_token=self.tokenizer.eos_token_id, top_k=1,
+                                            supress=[self.tokenizer.convert_tokens_to_ids('[SEP]'),
+                                                     self.tokenizer.convert_tokens_to_ids('[ENT]')])
+
+        filled_sentence = filled_sentence[:, caption.shape[1]:]
+        filled_sentence = filled_sentence.cpu().data.numpy()[0]
+
+        text = self.tokenizer.decode(filled_sentence, clean_up_tokenization_spaces=True)
+        text = text[: text.find(self.tokenizer.eos_token)].strip()
+
+        def clean_str(strings):
+            new_strings = []
+            for string in strings:
+                string = re.sub(r' +', ' ', string)
+                if len(string.split(' ')) < 6 and len(new_strings) > 0:
+                    string = new_strings[-1]
+                new_strings.append(string)
+            return new_strings
+
+        text = clean_str([text])[0]
+        try:
+            ent_list = get_ent_vals(yt, text)
+        except ValueError as e:
+            ent_list = []
+            # error_set.add((str(e), tmplts[b_idx], text))
+            # Handle this
+            raise e
+
+        if len(ent_list) == 0:
+            return None
+
+        new_y = []
+        ent_ix = 0
+        for w in yt.split(' '):
+            if w == '[ENT]':
+                new_y.append('[M1]')
+                new_y.append(ent_list[ent_ix])
+                new_y.append('[M2]')
+                ent_ix += 1
+            else:
+                new_y.append(w)
+        new_y = ' '.join(new_y)
+
+        return new_y, text, yt, ent_list
+
+    def _compute_reward(self, ent_to_fill, table_desc, table_title, full_template, y):
+        ent_list = get_ent_vals(full_template, y)
+        mask_to_apply = [True] * len(ent_list)
+        mask_to_apply[self.ent2ogidx[ent_to_fill]] = False
+        yt = ent_mask(full_template, y, mask_to_apply)
+        # Find the position of [ENT] in yt
+        ent_tok = self.tokenizer.tokenize('[ENT]')
+        ent_tok_idx = -1
+        for tok_idx, tok in enumerate(self.tokenizer.tokenize(yt)):
+            if ent_tok == tok:
+                ent_tok_idx = tok_idx
+                break
+        if ent_tok_idx == -1:
+            raise ValueError("[ENT] token not found!")
+        caption = self.get_caption_ids(table_desc, table_title, yt)
+        probs = sample_sequence_get_prob(self.template_filler, ent_tok_idx, 30, caption, [],
+                                         stop_token=self.tokenizer.eos_token_id, top_k=1,
+                                         supress=[self.tokenizer.convert_tokens_to_ids('[SEP]'),
+                                                  self.tokenizer.convert_tokens_to_ids('[ENT]')])
+
+        chosen_token_id = self.tokenizer.encode(self.ent_list[ent_to_fill])
+        return probs[chosen_token_id]
+
+    def reset(self):
+        self.curr_entry = self.train[self.train_indices[self.curr_idx]]
+        self.curr_idx += 1
+        ent_list = get_ent_vals(self.curr_entry[3], self.curr_entry[0])
+        self._full_template = self.curr_entry[3]
+        if len(ent_list) > self.n_actions:
+            to_remove = random.sample(range(len(ent_list)), len(ent_list) - self.n_actions)
+            unfilled_ents = [False] * len(ent_list)
+            for i in to_remove:
+                unfilled_ents[i] = True
+            self._full_template = ent_mask(self.yt, self.filled_txt, unfilled_ents)
+
+        state, filled_txt, yt, ent_list = self._fill_template(
+            self.curr_entry[-1], self.curr_entry[2], self._full_template)
+        self._update(filled_txt, yt, ent_list, state)
+        self.ent2ogidx = {i: i for i in range(len(ent_list))}
+        if state is not None:
+            return state
+        return self.reset()
+
+    def step(self, ent_to_fill):
+        if ent_to_fill > len(self.ent_list):
+            return self._state, -1e-3, len(self.ent_list) == 0, None
+
+        unfilled_ents = [False] * len(self.ent_list)
+        unfilled_ents[ent_to_fill] = True
+        new_yt = ent_mask(self.yt, self.filled_txt, unfilled_ents)
+
+        _ent2ogidx = {}
+        for cidx in range(len(self.ent_list) - 1):
+            if cidx < ent_to_fill:
+                _ent2ogidx[cidx] = self.ent2ogidx[cidx]
+            else:
+                _ent2ogidx[cidx] = self.ent2ogidx[cidx + 1]
+        self.ent2ogidx = _ent2ogidx
+
+        state, filled_txt, yt, ent_list = self._fill_template(
+            self.curr_entry[-1], self.curr_entry[2], new_yt)
+        self._update(filled_txt, yt, ent_list, state)
+
+        reward = self._compute_reward(
+            ent_to_fill, self.curr_entry[-1], self.curr_entry[2], self._full_template, self.curr_entry[0])
+        return state, reward, len(self.ent_list) == 0, None
 
 
 class GPTTableDataset2(Dataset):

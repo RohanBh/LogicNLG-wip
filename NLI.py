@@ -4,9 +4,10 @@ import os
 import random
 
 import pandas
+import torch
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
-from transformers import AdamW, get_linear_schedule_with_warmup
+from transformers import AdamW, get_linear_schedule_with_warmup, BertConfig
 from transformers import BertTokenizer
 
 from NLI_models import *

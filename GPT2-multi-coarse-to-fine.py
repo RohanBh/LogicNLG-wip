@@ -16,6 +16,7 @@ from tqdm.auto import tqdm
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
 from DataLoader import *
+from Model import ActorCritic
 from gen_new_data import get_ent_vals, ent_mask
 from utils import sample_sequence_2
 
@@ -35,7 +36,14 @@ def clean_str(strings):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default='gpt2', type=str)
-    parser.add_argument('--do_train', default=False, action="store_true", help="Train the model")
+    parser.add_argument('--do_train', default=False, action="store_true", help="Train a prediction model")
+    parser.add_argument('--do_rl', default=False, action="store_true", help="Use RL to train a sequence order model")
+    parser.add_argument('--n_actions', default=10, type=int, help="Total maximum actions that the agent can consider")
+    parser.add_argument('--episodes', default=10000, type=int, help="Total episodes to train the model")
+    parser.add_argument('--gamma', default=0.99, type=float, help="Discounting factor")
+    parser.add_argument('--max_steps', default=15, type=int, help="Maximum steps allowed")
+
+
     parser.add_argument('--do_test', default=False, action="store_true",
                         help="Compute bleu-1/2/3 and save the decoded results")
     parser.add_argument('--do_verify', default=False, action="store_true",
@@ -63,10 +71,12 @@ if __name__ == '__main__':
     if args.model == 'gpt2-medium':
         args.batch_size = 2
 
+    if args.do_rl:
+        args.batch_size = 1
+
     print(args)
 
     tokenizer = GPT2Tokenizer.from_pretrained(args.model)
-
     tokenizer.add_tokens(['[ENT]', '[SEP]'])
 
     model = GPT2LMHeadModel.from_pretrained(args.model)
@@ -85,8 +95,6 @@ if __name__ == '__main__':
         dataset = GPTTableCoarseFineDatabase3('data/train_lm_new.json', None, None, tokenizer, args.batch_size,
                                               args.max_len, window_size=args.window_size,
                                               random_sampling=args.random_sampling)
-        # if args.stage == 2:
-        #     model.load_state_dict(torch.load(args.load_from))
 
         model.train()
         optimizer = optim.Adam(model.parameters(), args.learning_rate)
@@ -157,6 +165,73 @@ if __name__ == '__main__':
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict()},
                     '{}/GPT_new_C2F_medium_ep{}.pt'.format(args.id, epoch_idx))
+
+    if args.do_rl:
+        # tmm = template masking model
+        recording_time = datetime.now().strftime('%m_%d_%H_%M')
+        tb_writer = SummaryWriter(log_dir='tensorboard/GPT_tmm/{}'.format(recording_time))
+
+        scorer = model
+        scorer.load_state_dict(torch.load(args.load_from)['model_state_dict'])
+        scorer.eval()
+
+        actor_critic = ActorCritic(n_actions=args.n_actions)
+        actor_critic = nn.DataParallel(actor_critic)
+        actor_critic.to(args.device)
+        actor_critic.train()
+
+        optimizer = optim.Adam(actor_critic.parameters(), args.learning_rate)
+
+        env = GPTSentenceMaskEnv('data/val_lm_improved.json', tokenizer, scorer, device=args.device)
+
+        best_score = 0
+        score_history = []
+
+        for i in tqdm(range(args.episodes), total=args.episodes):
+            state = env.reset()
+            state = Variable(state).to(device)
+            done = False
+            score = 0
+            step_idx = 1
+            while not done:
+                probs, state_value = actor_critic(state)
+                action_probs = torch.distributions.categorical.Categorical(probs)
+                action = action_probs.sample()
+
+                next_state, reward, done, _ = env.step(action)
+                next_state = Variable(next_state).to(device)
+                done = done or step_idx >= args.max_steps
+                score += reward
+
+                _, next_state_value = actor_critic(next_state)
+                log_prob = action_probs.log_prob(action)
+                delta = reward + args.gamma * next_state_value * (1 - int(done)) - state_value
+                actor_loss = -log_prob * delta
+                critic_loss = delta ** 2
+                total_loss = actor_loss + critic_loss
+
+                actor_critic.zero_grad()
+                optimizer.zero_grad()
+
+                total_loss.backward()
+
+                optimizer.step()
+
+                state = next_state
+                step_idx += 1
+
+            score_history.append(score)
+            avg_score = np.mean(score_history[-100:])
+
+            if avg_score > best_score:
+                best_score = avg_score
+                # save model
+
+            print('episode ', i, 'score %.1f' % score, 'avg_score %.1f' % avg_score)
+
+
+
+
 
     if args.do_test:
         dataset = GPTTableCoarseFineDatabase3(None, None, 'data/test_lm.json', tokenizer,

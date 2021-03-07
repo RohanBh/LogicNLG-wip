@@ -2,6 +2,7 @@
 *pyc
 .idea/
 data/train_lm_new.json
+data/*_lm_improved.json
 NLI_models.zip
 NLI_models/
 data/all_csv/

@@ -1,11 +1,10 @@
-import torch.optim as optim
-from torch import nn
-import torch
-from torch import autograd
-import torch.nn.functional as F
 import math
+
 import numpy as np
-from transformers import BertModel
+import torch
+import torch.nn.functional as F
+from torch import nn
+from transformers import BertModel, GPT2Model, GPT2Tokenizer
 
 
 class PositionalEmbedding(nn.Module):
@@ -56,7 +55,6 @@ class MultiHeadAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, q, k, v, mask=None):
-
         d_k, d_v, n_head = self.d_k, self.d_v, self.n_head
 
         sz_b, len_q, _ = q.size()
@@ -116,7 +114,6 @@ class ScaledDotProductAttention(nn.Module):
         self.softmax = nn.Softmax(dim=2)
 
     def forward(self, q, k, v, mask=None):
-
         attn = torch.bmm(q, k.transpose(1, 2))
         attn = attn / self.temperature
 
@@ -417,11 +414,11 @@ class Ranker(nn.Module):
 
         self.enc_stack = nn.ModuleList(
             [EncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
-                for _ in range(n_layers)])
+             for _ in range(n_layers)])
 
         self.dec_stack = nn.ModuleList(
             [DecoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
-                for _ in range(n_layers)])
+             for _ in range(n_layers)])
 
         self.tgt_word_prj = nn.Linear(d_model, 2, bias=True)
 
@@ -483,3 +480,30 @@ class BERTRanker(nn.Module):
         logits = self.proj(text_representation)
         prob = torch.softmax(logits, -1)
         return prob[:, 1]
+
+
+class ActorCritic(nn.Module):
+    def __init__(self, n_actions=10):
+        super(ActorCritic, self).__init__()
+        self.gpt2 = GPT2Model.from_pretrained("gpt2")
+        self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        self.tokenizer.add_tokens(['[ENT]', '[M1]', '[M2]'])
+        self.gpt2.resize_token_embeddings(len(self.tokenizer))
+
+        self.n_actions = n_actions
+
+        self.l1 = nn.Linear(self.gpt2.config.n_embd, self.n_actions, bias=False)
+        self.l2 = nn.Linear(self.gpt2.config.n_embd, 1, bias=False)
+        return
+
+    def __forward__(self, state):
+        # Remember to pad x on the left
+        # batch_size = 1
+        # x - batch_size x seq_len x hidden_size
+        input_ids = self.tokenizer.encode(state)
+        x = self.gpt2(input_ids=input_ids)
+        x = x[:, -1, :]
+        # batch_size x n_actions
+        logits = self.l1(x)
+        prob = torch.softmax(logits, -1)
+        return prob, self.l2(x)
