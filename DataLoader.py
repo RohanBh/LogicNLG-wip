@@ -753,10 +753,10 @@ class GPTSentenceMaskEnv:
         try:
             ent_list = get_ent_vals(yt, text)
         except ValueError as e:
-            return [None] * 4
+            return [None] * 3
 
         if len(ent_list) == 0:
-            return '', '', '', ent_list
+            return '', '', ent_list
 
         new_y = []
         ent_ix = 0
@@ -775,7 +775,8 @@ class GPTSentenceMaskEnv:
     def _compute_reward(self, ent_to_fill, ent_val_to_fill, table_desc, table_title, full_template, y):
         ent_list_og = get_ent_vals(full_template, y)
         mask_to_apply = [True] * len(ent_list_og)
-        mask_to_apply[self.ent2ogidx[ent_to_fill]] = False
+        og_ent_idx = self.ent2ogidx[ent_to_fill]
+        mask_to_apply[og_ent_idx] = False
         yt = ent_mask(full_template, y, mask_to_apply)
         # Find the position of [ENT] in yt
         ent_tok = self.tokenizer.tokenize('[ENT]')[0]
@@ -795,7 +796,8 @@ class GPTSentenceMaskEnv:
             return None
 
         chosen_token_id = self.tokenizer.encode(ent_val_to_fill)
-        return probs[chosen_token_id].item()
+        r = probs[chosen_token_id].sum().item()
+        return r
 
     def reset(self):
         tid, eid = self.train_indices[self.curr_idx]
@@ -824,14 +826,15 @@ class GPTSentenceMaskEnv:
             return first_state
         return self.reset()
 
-    def _update_ent2ogidx(self, ent_to_fill):
+    def _update_ent2ogidx(self, ent_to_fill, ent_list):
         _ent2ogidx = {}
-        for cidx in range(len(self.ent_list) - 1):
+        for cidx in range(len(ent_list) - 1):
             if cidx < ent_to_fill:
                 _ent2ogidx[cidx] = self.ent2ogidx[cidx]
             else:
                 _ent2ogidx[cidx] = self.ent2ogidx[cidx + 1]
         self.ent2ogidx = _ent2ogidx
+        return self.ent2ogidx
 
     def step(self, ent_to_fill):
         ent_to_fill = ent_to_fill.cpu().item()
@@ -852,11 +855,11 @@ class GPTSentenceMaskEnv:
             self.curr_entry[-1], self.curr_entry[2], new_yt)
 
         if next_state is not None:
+            self._update_ent2ogidx(ent_to_fill, self.ent_list)
             self.ent_list = next_ent_list
             self.filled_txt = filled_txt
             self.yt = new_yt
             self._state = next_state
-            self._update_ent2ogidx(ent_to_fill)
 
             if reward is not None:
                 return next_state, reward, len(self.ent_list) == 0, None
