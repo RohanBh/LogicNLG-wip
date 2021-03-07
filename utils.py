@@ -172,8 +172,7 @@ def sample_sequence_get_prob(model, ent_tok_idx, length, context, args, num_samp
 
             if all(finished_sentence):
                 break
-
-    return generated
+    return None
 
 
 def powerset(iterable):

@@ -250,7 +250,7 @@ if __name__ == '__main__':
                 tb_writer.add_scalar("critic_loss", avg_loss_2 / 30, i)
                 tb_writer.add_scalar("best_reward", best_score, i)
                 tb_writer.add_scalar("avg_ep_len", np.mean(ep_len_history[-100:]), i)
-                tqdm.write('episode ', i, 'score %.1f' % score, 'avg_score %.1f' % avg_score)
+                tqdm.write(f'episode {i}, score {score}, avg_score {avg_score}')
 
             if i % args.save_every == 0:
                 torch.save({

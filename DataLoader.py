@@ -797,6 +797,8 @@ class GPTSentenceMaskEnv:
                                          stop_token=self.tokenizer.eos_token_id, top_k=1,
                                          supress=[self.tokenizer.convert_tokens_to_ids('[SEP]'),
                                                   self.tokenizer.convert_tokens_to_ids('[ENT]')])
+        if probs is None:
+            return None
 
         chosen_token_id = self.tokenizer.encode(self.ent_list[ent_to_fill])
         return probs[chosen_token_id]
