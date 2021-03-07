@@ -175,7 +175,7 @@ if __name__ == '__main__':
         scorer.load_state_dict(torch.load(args.load_from)['model_state_dict'])
         scorer.eval()
 
-        actor_critic = ActorCritic(n_actions=args.n_actions)
+        actor_critic = ActorCritic(n_actions=args.n_actions, device=args.device)
         actor_critic = nn.DataParallel(actor_critic)
         actor_critic.to(args.device)
         actor_critic.train()
@@ -250,6 +250,7 @@ if __name__ == '__main__':
                 tb_writer.add_scalar("critic_loss", avg_loss_2 / 30, i)
                 tb_writer.add_scalar("best_reward", best_score, i)
                 tb_writer.add_scalar("avg_ep_len", np.mean(ep_len_history[-100:]), i)
+                tqdm.write('episode ', i, 'score %.1f' % score, 'avg_score %.1f' % avg_score)
 
             if i % args.save_every == 0:
                 torch.save({
@@ -257,7 +258,6 @@ if __name__ == '__main__':
                     'optimizer_state_dict': optimizer.state_dict()},
                     '{}/GPT_RL_episode_{:05}.pt'.format(args.id, i))
 
-            print('episode ', i, 'score %.1f' % score, 'avg_score %.1f' % avg_score)
 
     if args.do_test:
         dataset = GPTTableCoarseFineDatabase3(None, None, 'data/test_lm.json', tokenizer,

@@ -823,7 +823,8 @@ class GPTSentenceMaskEnv:
         return self.reset()
 
     def step(self, ent_to_fill):
-        if ent_to_fill > len(self.ent_list):
+        ent_to_fill = ent_to_fill.cpu().item()
+        if ent_to_fill >= len(self.ent_list):
             return self._state, -1e-3, len(self.ent_list) == 0, None
 
         unfilled_ents = [False] * len(self.ent_list)
