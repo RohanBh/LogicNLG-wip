@@ -12,7 +12,7 @@ from torch import nn
 from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from transformers import GPT2LMHeadModel, GPT2Tokenizer, AdamW, get_linear_schedule_with_warmup
 
 from DataLoader import *
 from Model import ActorCritic
@@ -38,7 +38,7 @@ if __name__ == '__main__':
     parser.add_argument('--do_train', default=False, action="store_true", help="Train a prediction model")
     parser.add_argument('--do_rl', default=False, action="store_true", help="Use RL to train a sequence order model")
     parser.add_argument('--n_actions', default=10, type=int, help="Total maximum actions that the agent can consider")
-    parser.add_argument('--episodes', default=10000, type=int, help="Total episodes to train the model")
+    parser.add_argument('--episodes', default=1051, type=int, help="Total episodes to train the model")
     parser.add_argument('--gamma', default=0.99, type=float, help="Discounting factor")
     parser.add_argument('--max_steps', default=15, type=int, help="Maximum steps allowed")
     parser.add_argument('--save_every', default=500, type=int, help="save every n episodes")
@@ -97,7 +97,10 @@ if __name__ == '__main__':
                                               random_sampling=args.random_sampling)
 
         model.train()
-        optimizer = optim.Adam(model.parameters(), args.learning_rate)
+        # optimizer = optim.Adam(model.parameters(), args.learning_rate)
+        optimizer = AdamW(model.parameters(), lr=args.learning_rate)
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer, num_warmup_steps=1000, num_training_steps=35000)
 
         avg_loss = 0
         global_step = 0
@@ -105,6 +108,7 @@ if __name__ == '__main__':
             checkpoint = torch.load('{}/GPT_new_C2F_ep{}.pt'.format(args.id, args.start_epoch - 1))
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
         for epoch_idx in range(args.start_epoch, args.start_epoch + args.epoch):
             print("start training {}th epoch".format(epoch_idx))
@@ -129,6 +133,7 @@ if __name__ == '__main__':
 
                 loss.backward()
                 optimizer.step()
+                scheduler.step()
                 global_step += 1
 
                 if idx % args.every == 0 and idx > 0:
@@ -157,7 +162,9 @@ if __name__ == '__main__':
                 torch.save({
                     'epoch': epoch_idx,
                     'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict()},
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict()
+                },
                     '{}/GPT_new_C2F_ep{}.pt'.format(args.id, epoch_idx))
             else:
                 torch.save({
