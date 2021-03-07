@@ -712,12 +712,6 @@ class GPTSentenceMaskEnv:
     def train_len(self):
         return len(self.train)
 
-    def _update(self, filled_txt, yt, ent_list, state):
-        self.filled_txt = filled_txt
-        self.yt = yt
-        self.ent_list = ent_list
-        self._state = state
-
     def get_caption_ids(self, table_desc, table_title, yt):
         tmp_idx = self.tokenizer.tokenize(table_desc)
         if len(tmp_idx) > self.max_len:
@@ -776,15 +770,15 @@ class GPTSentenceMaskEnv:
                 new_y.append(w)
         new_y = ' '.join(new_y)
 
-        return new_y, text, yt, ent_list
+        return new_y, text, ent_list
 
-    def _compute_reward(self, ent_to_fill, table_desc, table_title, full_template, y):
-        ent_list = get_ent_vals(full_template, y)
-        mask_to_apply = [True] * len(ent_list)
+    def _compute_reward(self, ent_to_fill, ent_val_to_fill, table_desc, table_title, full_template, y):
+        ent_list_og = get_ent_vals(full_template, y)
+        mask_to_apply = [True] * len(ent_list_og)
         mask_to_apply[self.ent2ogidx[ent_to_fill]] = False
         yt = ent_mask(full_template, y, mask_to_apply)
         # Find the position of [ENT] in yt
-        ent_tok = self.tokenizer.tokenize('[ENT]')
+        ent_tok = self.tokenizer.tokenize('[ENT]')[0]
         ent_tok_idx = -1
         for tok_idx, tok in enumerate(self.tokenizer.tokenize(yt)):
             if ent_tok == tok:
@@ -800,28 +794,34 @@ class GPTSentenceMaskEnv:
         if probs is None:
             return None
 
-        chosen_token_id = self.tokenizer.encode(self.ent_list[ent_to_fill])
-        return probs[chosen_token_id]
+        chosen_token_id = self.tokenizer.encode(ent_val_to_fill)
+        return probs[chosen_token_id].item()
 
     def reset(self):
         tid, eid = self.train_indices[self.curr_idx]
-        self.curr_entry = self.train[tid][eid]
         self.curr_idx += 1
-        ent_list = get_ent_vals(self.curr_entry[3], self.curr_entry[0])
+        self.curr_entry = self.train[tid][eid]
+
+        # limit the number of entitiies we have to fill in one episode
+        ent_list_og = get_ent_vals(self.curr_entry[3], self.curr_entry[0])
         self._full_template = self.curr_entry[3]
-        if len(ent_list) > self.n_actions:
-            to_remove = random.sample(range(len(ent_list)), len(ent_list) - self.n_actions)
-            unfilled_ents = [False] * len(ent_list)
+        if len(ent_list_og) > self.n_actions:
+            to_remove = random.sample(range(len(ent_list_og)), len(ent_list_og) - self.n_actions)
+            unfilled_ents = [False] * len(ent_list_og)
             for i in to_remove:
                 unfilled_ents[i] = True
             self._full_template = ent_mask(self.curr_entry[3], self.curr_entry[0], unfilled_ents)
 
-        state, filled_txt, yt, ent_list = self._fill_template(
+        first_state, filled_txt, ent_list = self._fill_template(
             self.curr_entry[-1], self.curr_entry[2], self._full_template)
-        if state is not None and len(state) > 0:
-            self._update(filled_txt, yt, ent_list, state)
+        if first_state is not None and len(first_state) > 0:
+            self.ent_list = ent_list
+            self.filled_txt = filled_txt
+            self._state = first_state
+            self.yt = self._full_template
             self.ent2ogidx = {i: i for i in range(len(ent_list))}
-            return state
+
+            return first_state
         return self.reset()
 
     def _update_ent2ogidx(self, ent_to_fill):
@@ -836,23 +836,32 @@ class GPTSentenceMaskEnv:
     def step(self, ent_to_fill):
         ent_to_fill = ent_to_fill.cpu().item()
         if ent_to_fill >= len(self.ent_list):
-            return self._state, -1e-3, len(self.ent_list) == 0, None
+            return self._state, -1e-5, len(self.ent_list) == 0, None
 
+        # compute reward
+        ent_val_to_fill = self.ent_list[ent_to_fill]
+        reward = self._compute_reward(
+            ent_to_fill, ent_val_to_fill, self.curr_entry[-1], self.curr_entry[2], self._full_template,
+            self.curr_entry[0])
+
+        # transition to the next state
         unfilled_ents = [False] * len(self.ent_list)
         unfilled_ents[ent_to_fill] = True
         new_yt = ent_mask(self.yt, self.filled_txt, unfilled_ents)
-
-        state, filled_txt, yt, ent_list = self._fill_template(
+        next_state, filled_txt, next_ent_list = self._fill_template(
             self.curr_entry[-1], self.curr_entry[2], new_yt)
-        self._update(filled_txt, yt, ent_list, state)
-        if state is not None:
-            reward = self._compute_reward(
-                ent_to_fill, self.curr_entry[-1], self.curr_entry[2], self._full_template, self.curr_entry[0])
+
+        if next_state is not None:
+            self.ent_list = next_ent_list
+            self.filled_txt = filled_txt
+            self.yt = new_yt
+            self._state = next_state
             self._update_ent2ogidx(ent_to_fill)
+
             if reward is not None:
-                return state, reward, len(self.ent_list) == 0, None
-            return state, 0, True, None
-        return state, 0, True, None
+                return next_state, reward, len(self.ent_list) == 0, None
+            return next_state, 0, True, None
+        return next_state, 0, True, None
 
 
 class GPTTableDataset2(Dataset):
