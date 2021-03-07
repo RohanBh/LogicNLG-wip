@@ -258,7 +258,6 @@ if __name__ == '__main__':
                     'optimizer_state_dict': optimizer.state_dict()},
                     '{}/GPT_RL_episode_{:05}.pt'.format(args.id, i))
 
-
     if args.do_test:
         dataset = GPTTableCoarseFineDatabase3(None, None, 'data/test_lm.json', tokenizer,
                                               args.batch_size, args.max_len,

@@ -822,6 +822,15 @@ class GPTSentenceMaskEnv:
             return state
         return self.reset()
 
+    def _update_ent2ogidx(self, ent_to_fill):
+        _ent2ogidx = {}
+        for cidx in range(len(self.ent_list) - 1):
+            if cidx < ent_to_fill:
+                _ent2ogidx[cidx] = self.ent2ogidx[cidx]
+            else:
+                _ent2ogidx[cidx] = self.ent2ogidx[cidx + 1]
+        self.ent2ogidx = _ent2ogidx
+
     def step(self, ent_to_fill):
         ent_to_fill = ent_to_fill.cpu().item()
         if ent_to_fill >= len(self.ent_list):
@@ -831,20 +840,13 @@ class GPTSentenceMaskEnv:
         unfilled_ents[ent_to_fill] = True
         new_yt = ent_mask(self.yt, self.filled_txt, unfilled_ents)
 
-        _ent2ogidx = {}
-        for cidx in range(len(self.ent_list) - 1):
-            if cidx < ent_to_fill:
-                _ent2ogidx[cidx] = self.ent2ogidx[cidx]
-            else:
-                _ent2ogidx[cidx] = self.ent2ogidx[cidx + 1]
-        self.ent2ogidx = _ent2ogidx
-
         state, filled_txt, yt, ent_list = self._fill_template(
             self.curr_entry[-1], self.curr_entry[2], new_yt)
         self._update(filled_txt, yt, ent_list, state)
         if state is not None:
             reward = self._compute_reward(
                 ent_to_fill, self.curr_entry[-1], self.curr_entry[2], self._full_template, self.curr_entry[0])
+            self._update_ent2ogidx(ent_to_fill)
             if reward is not None:
                 return state, reward, len(self.ent_list) == 0, None
             return state, 0, True, None
