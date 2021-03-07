@@ -276,6 +276,29 @@ def ent_2_stats():
     tqdm.write(f"mean_len {np.mean(ent_len_dist)}")
     return
 
+def ent_3_stats():
+    train_name = 'data/val_lm_improved.json'
+    with open(train_name, 'r') as f:
+        train_data = json.load(f)
+
+    ent_dist = []
+    for tid, entries in tqdm(train_data.items(), total=len(train_data)):
+        for entry in entries:
+            template = entry[3]
+            ent_dist.append(count_ent_1(template))
+    pctl_list = [0, 25, 50, 75, 80, 90, 95, 97, 99, 100]
+    tqdm.write(f"#ENT Percentiles: {dict(zip(pctl_list, np.percentile(ent_dist, pctl_list)))}")
+    tqdm.write(f"mean_num_ents {np.mean(ent_dist)}")
+
+    ent_len_dist = []
+    for tid, entries in tqdm(train_data.items(), total=len(train_data)):
+        for entry in entries:
+            template = entry[3]
+            ent_len_dist.append(len(template.split(' ')))
+    tqdm.write(f"Sentence length Percentiles: {dict(zip(pctl_list, np.percentile(ent_len_dist, pctl_list)))}")
+    tqdm.write(f"mean_len {np.mean(ent_len_dist)}")
+    return
+
 
 if __name__ == '__main__':
     # comp_data_len_1()
@@ -293,4 +316,6 @@ if __name__ == '__main__':
     # ent_2_stats()
 
     # create_new_json_2()
-    create_new_json_3()
+    # create_new_json_3()
+
+    ent_3_stats()

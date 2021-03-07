@@ -186,6 +186,8 @@ if __name__ == '__main__':
         best_score = 0
         avg_loss_1 = 0
         avg_loss_2 = 0
+        global_step = 0
+        avg_loss_history = []
         score_history = []
         ep_len_history = []
 
@@ -231,6 +233,13 @@ if __name__ == '__main__':
                 if not done:
                     state = next_state
                     step_idx += 1
+                    global_step += 1
+                    if global_step % 100 == 0:
+                        tb_writer.add_scalar("actor_loss", avg_loss_1 / 100, global_step)
+                        tb_writer.add_scalar("critic_loss", avg_loss_2 / 100, global_step)
+                        avg_loss_history.append((avg_loss_1, avg_loss_2))
+                        avg_loss_1 = 0
+                        avg_loss_2 = 0
 
                 if done:
                     tb_writer.add_scalar("ep_return", score, i)
@@ -238,21 +247,24 @@ if __name__ == '__main__':
 
             score_history.append(score)
             ep_len_history.append(step_idx)
-            avg_score = np.mean(score_history[-100:])
+            avg_score = np.mean(score_history[-30:])
 
             if avg_score > best_score:
                 best_score = avg_score
 
             if i % 30 == 0:
+                tb_writer.add_scalar("total_steps", global_step, i)
                 tb_writer.add_scalar("avg_reward", avg_score, i)
-                tb_writer.add_scalar("actor_loss", avg_loss_1 / 30, i)
-                tb_writer.add_scalar("critic_loss", avg_loss_2 / 30, i)
                 tb_writer.add_scalar("best_reward", best_score, i)
-                tb_writer.add_scalar("avg_ep_len", np.mean(ep_len_history[-100:]), i)
+                tb_writer.add_scalar("avg_ep_len", np.mean(ep_len_history[-30:]), i)
                 tqdm.write(f'episode {i}, score {score}, avg_score {avg_score}')
 
             if i % args.save_every == 0:
                 torch.save({
+                    'total_steps': global_step,
+                    'score_history': score_history,
+                    'ep_len_history': ep_len_history,
+                    'avg_loss_history': avg_loss_history,
                     'model_state_dict': actor_critic.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict()},
                     '{}/GPT_RL_episode_{:05}.pt'.format(args.id, i))

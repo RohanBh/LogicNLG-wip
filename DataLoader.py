@@ -8,7 +8,7 @@ import pandas
 import torch
 from torch.utils.data import Dataset
 
-from gen_new_data import get_ent_vals, ent_mask
+from gen_new_data import get_ent_vals, ent_mask, count_ent_1
 from utils import sample_sequence_2, sample_sequence_get_prob
 
 
@@ -768,12 +768,17 @@ class GPTSentenceMaskEnv:
                 ent_ix += 1
             else:
                 new_y.append(w)
+        # Add the knowledge of total actions
+        new_y.append(str(count_ent_1(yt)))
         new_y = ' '.join(new_y)
 
         return new_y, text, ent_list
 
     def _compute_reward(self, ent_to_fill, ent_val_to_fill, table_desc, table_title, full_template, y):
-        ent_list_og = get_ent_vals(full_template, y)
+        try:
+            ent_list_og = get_ent_vals(full_template, y)
+        except ValueError as e:
+            return None
         mask_to_apply = [True] * len(ent_list_og)
         og_ent_idx = self.ent2ogidx[ent_to_fill]
         mask_to_apply[og_ent_idx] = False
@@ -805,7 +810,10 @@ class GPTSentenceMaskEnv:
         self.curr_entry = self.train[tid][eid]
 
         # limit the number of entitiies we have to fill in one episode
-        ent_list_og = get_ent_vals(self.curr_entry[3], self.curr_entry[0])
+        try:
+            ent_list_og = get_ent_vals(self.curr_entry[3], self.curr_entry[0])
+        except ValueError as e:
+            return self.reset()
         self._full_template = self.curr_entry[3]
         if len(ent_list_og) > self.n_actions:
             to_remove = random.sample(range(len(ent_list_og)), len(ent_list_og) - self.n_actions)
@@ -839,7 +847,7 @@ class GPTSentenceMaskEnv:
     def step(self, ent_to_fill):
         ent_to_fill = ent_to_fill.cpu().item()
         if ent_to_fill >= len(self.ent_list):
-            return self._state, -1e-5, len(self.ent_list) == 0, None
+            return self._state, -1e-2, len(self.ent_list) == 0, None
 
         # compute reward
         ent_val_to_fill = self.ent_list[ent_to_fill]
