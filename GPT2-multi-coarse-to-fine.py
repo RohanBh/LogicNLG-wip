@@ -1,7 +1,6 @@
 import argparse
 import math
 import os
-import re
 import sys
 import time
 from datetime import datetime
@@ -42,7 +41,8 @@ if __name__ == '__main__':
     parser.add_argument('--episodes', default=10000, type=int, help="Total episodes to train the model")
     parser.add_argument('--gamma', default=0.99, type=float, help="Discounting factor")
     parser.add_argument('--max_steps', default=15, type=int, help="Maximum steps allowed")
-
+    parser.add_argument('--save_every', default=500, type=int, help="save every n episodes")
+    parser.add_argument('--start_episode', default=0, type=int, help="The episode to resume training")
 
     parser.add_argument('--do_test', default=False, action="store_true",
                         help="Compute bleu-1/2/3 and save the decoded results")
@@ -185,9 +185,17 @@ if __name__ == '__main__':
         env = GPTSentenceMaskEnv('data/val_lm_improved.json', tokenizer, scorer, device=args.device)
 
         best_score = 0
+        avg_loss_1 = 0
+        avg_loss_2 = 0
         score_history = []
+        ep_len_history = []
 
-        for i in tqdm(range(args.episodes), total=args.episodes):
+        if args.start_episode != 0:
+            checkpoint = torch.load('{}/GPT_RL_episode_{}.pt'.format(args.id, args.start_episode))
+            actor_critic.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        for i in tqdm(range(args.start_episode, args.episodes + 1), total=args.episodes):
             state = env.reset()
             done = False
             score = 0
@@ -210,6 +218,8 @@ if __name__ == '__main__':
                 delta = reward + args.gamma * next_state_value * (1 - int(done)) - state_value
                 actor_loss = -log_prob * delta
                 critic_loss = delta ** 2
+                avg_loss_1 += actor_loss
+                avg_loss_2 += critic_loss
                 total_loss = actor_loss + critic_loss
 
                 actor_critic.zero_grad()
@@ -219,21 +229,35 @@ if __name__ == '__main__':
 
                 optimizer.step()
 
-                state = next_state
-                step_idx += 1
+                if not done:
+                    state = next_state
+                    step_idx += 1
+
+                if done:
+                    tb_writer.add_scalar("ep_return", score, i)
+                    tb_writer.add_scalar("ep_len", step_idx, i)
 
             score_history.append(score)
+            ep_len_history.append(step_idx)
             avg_score = np.mean(score_history[-100:])
 
             if avg_score > best_score:
                 best_score = avg_score
-                # save model
+
+            if i % 30 == 0:
+                tb_writer.add_scalar("avg_reward", avg_score, i)
+                tb_writer.add_scalar("actor_loss", avg_loss_1 / 30, i)
+                tb_writer.add_scalar("critic_loss", avg_loss_2 / 30, i)
+                tb_writer.add_scalar("best_reward", best_score, i)
+                tb_writer.add_scalar("avg_ep_len", np.mean(ep_len_history[-100:]), i)
+
+            if i % args.save_every == 0:
+                torch.save({
+                    'model_state_dict': actor_critic.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict()},
+                    '{}/GPT_RL_episode_{:05}.pt'.format(args.id, i))
 
             print('episode ', i, 'score %.1f' % score, 'avg_score %.1f' % avg_score)
-
-
-
-
 
     if args.do_test:
         dataset = GPTTableCoarseFineDatabase3(None, None, 'data/test_lm.json', tokenizer,
