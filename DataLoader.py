@@ -814,11 +814,11 @@ class GPTSentenceMaskEnv:
             unfilled_ents = [False] * len(ent_list)
             for i in to_remove:
                 unfilled_ents[i] = True
-            self._full_template = ent_mask(self.yt, self.filled_txt, unfilled_ents)
+            self._full_template = ent_mask(self.curr_entry[3], self.curr_entry[0], unfilled_ents)
 
         state, filled_txt, yt, ent_list = self._fill_template(
             self.curr_entry[-1], self.curr_entry[2], self._full_template)
-        if state is not None:
+        if state is not None and len(state) > 0:
             self._update(filled_txt, yt, ent_list, state)
             self.ent2ogidx = {i: i for i in range(len(ent_list))}
             return state

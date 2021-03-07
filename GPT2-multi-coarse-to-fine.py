@@ -167,9 +167,8 @@ if __name__ == '__main__':
                     '{}/GPT_new_C2F_medium_ep{}.pt'.format(args.id, epoch_idx))
 
     if args.do_rl:
-        # tmm = template masking model
         recording_time = datetime.now().strftime('%m_%d_%H_%M')
-        tb_writer = SummaryWriter(log_dir='tensorboard/GPT_tmm/{}'.format(recording_time))
+        tb_writer = SummaryWriter(log_dir='tensorboard/GPT_rl/{}'.format(recording_time))
 
         scorer = model
         scorer.load_state_dict(torch.load(args.load_from)['model_state_dict'])
