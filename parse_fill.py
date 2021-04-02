@@ -1810,7 +1810,7 @@ def generate_programs():
     with mp.Pool(mp.cpu_count()) as pool:
         results = list(tqdm(pool.imap(parser.distribute_parse, zip(table_names, sents)), total=len(table_names)))
 
-    with open("data/progras.json", 'w') as f:
+    with open("data/programs.json", 'w') as f:
         json.dump(results, f, indent=2)
 
     return
