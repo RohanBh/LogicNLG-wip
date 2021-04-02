@@ -1595,8 +1595,9 @@ class Parser(object):
                             new_tokens[new_tokens.index(k)] = new_k
                             to_delete.append(k)
                             break
-        for k in to_delete:
-            del ent2content[k]
+                    for k in to_delete:
+                        del ent2content[k]
+                    to_delete = []
 
         for k, v in mem_num:
             if k not in head_num and k != "tmp_input":
@@ -1756,6 +1757,8 @@ def test_1():
     #                    'the Player ranked 1 and the Player ranked 2 both had an Average of 11.00', True, mask_num_ix=2))
     # print(parser.parse('1-12722302-2.html.csv', 'in Carnivàle season 1 , there were 8 different director',
     #                    True, mask_num_ix=0))
+    # print(parser.parse(
+    #     '2-13002617-3.html.csv', '2 City have an average High Temperature In July above 80 degree', True))
 
     # The parsing below fails because we require a unique_num followed by a hop but no trigger words are there
     # print(parser.parse('2-10153810-4.html.csv',
@@ -1805,7 +1808,7 @@ def generate_programs():
             sents.append(v[0])
 
     with mp.Pool(mp.cpu_count()) as pool:
-        results = tqdm(pool.imap(parser.distribute_parse, zip(table_names, sents)), total=len(table_names))
+        results = list(tqdm(pool.imap(parser.distribute_parse, zip(table_names, sents)), total=len(table_names)))
 
     with open("data/progras.json", 'w') as f:
         json.dump(results, f, indent=2)
