@@ -161,8 +161,11 @@ class Node(object):
         raise ValueError(f"Bad Node: {self.memory_num}")
 
     def done(self):
-        if self.memory_str_len == 0 and self.memory_num_len == 0 and \
-                self.memory_bool_len == 0 and all([_ > 0 for _ in self.row_counter]):
+        # if self.memory_str_len == 0 and self.memory_num_len == 0 and \
+        #         all([_ > 0 for _ in self.row_counter]):
+        finished_num = all(['tmp_input' == x[0] or 'tmp' not in x[0] for x in self.memory_num])
+        finished_str = all(['tmp_input' == x[0] or 'tmp' not in x[0] for x in self.memory_str])
+        if finished_num and finished_str and all([_ > 0 for _ in self.row_counter]):
             for funcs in self.must_have:
                 if any([f in self.cur_funcs for f in funcs]):
                     continue
@@ -365,6 +368,8 @@ class Node(object):
 def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_str, head_num, num=6, debug=False):
     must_have = []
     must_not_have = []
+    # Goes through non_triggers and absence of any triggers marks those
+    # functions as inactive. This is useful for search-space pruning
     for k, v in non_triggers.items():
         if isinstance(v[0], list):
             flags = []
@@ -409,9 +414,9 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_s
     node = Node(memory_str=mem_str, memory_num=mem_num, rows=t,
                 header_str=head_str, header_num=head_num, must_have=must_have, must_not_have=must_not_have)
 
+    # Whether a count function should be invoked on all rows?
     count_all = any([k == 'tmp_input' or k == 'msk_input' for k, v in mem_num])
 
-    start_time = time.time()
     # The result storage
     finished = []
     hist = [[node]] + [[] for _ in range(num)]
@@ -451,8 +456,6 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_s
                 if v['output'] == 'num' and root.tmp_memory_num_len >= 3:
                     continue
                 if v['output'] == 'str' and root.tmp_memory_str_len >= 3:
-                    continue
-                if v['output'] == 'bool' and root.memory_bool_len >= 3:
                     continue
                 if 'inc_' in k and 'inc' in root.cur_funcs:
                     continue
@@ -761,7 +764,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_s
                 else:
                     continue
 
-        if len(finished) > 100 or time.time() - start_time > 30:
+        if len(finished) > 100 or time.time() - start_time > 500:
             break
 
     return (name, orig_sent, sent, [_[0].cur_str for _ in finished])
@@ -1518,6 +1521,8 @@ class Parser(object):
                     ent2content["<COMPUTE{}>".format(ent_index)] = _
                     ent_index += 1
                     if head_num:
+                        # Bug: If compare_score > 0 and all hdrs in head_num are referenced by some entity in mem_num,
+                        # Then, the current token/word will be completely dropped off from the sentence
                         for h in head_num:
                             if any([_[0] == h for _ in mem_num]):
                                 continue
@@ -1611,6 +1616,8 @@ class Parser(object):
         linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
         masked_sent, mem_str, mem_num, head_str, head_num, mapping = self.initialize_buffer(table_name, linked_sent,
                                                                                             pos, raw_sent)
+        # memory_num and memory_str are (hdr, val) tuples which serve as arguments for the programs of type num and str
+        # resp. Whereas, header_num and header_str are useful for arguments of type header_num and header_str resp.
         if len(mem_num) == 0:
             return None
         mem_num = self.mask_random_number(mem_num, mask_num_ix)
@@ -1693,15 +1700,20 @@ def test_1():
     #     '2-12941233-13.html.csv',
     #     ('with over 100 Year of existance , princess Park staidum provided Hawthorn Football Club '
     #      'with the highest winning Percentage'), True))
+    # print(parser.parse('2-18936845-1.html.csv',
+    #                    'the Player ranked 1 and the Player ranked 2 both had an Average of 11.00', True, mask_num_ix=2))
+    # print(parser.parse('1-12722302-2.html.csv', 'in Carnivàle season 1 , there were 8 different director',
+    #                    True, mask_num_ix=0))
+
+    # The parsing below fails because we require a unique_num followed by a hop but no trigger words are there
+    # print(parser.parse('2-10153810-4.html.csv',
+    #                    'all 3 match in 1990 were from the Europe Zone Group Ii', True, mask_num_ix=0))
 
     # Requires splitting the data in a column
     # print(parser.parse(
     #     '2-12635188-4.html.csv', '6 game went into extra inning with the longest game lasting 14 inning', True))
 
     # Empty Set of programs (No programs produced here)
-    print(parser.parse('2-18936845-1.html.csv',
-                       'the Player ranked 1 and the Player ranked 2 both had an Average of 11.00', True, mask_num_ix=2))
-    # print(parser.parse('1-12722302-2.html.csv', 'in Carnivàle season 1 , there were 8 different director', True))
 
     return
 
