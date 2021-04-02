@@ -1,8 +1,10 @@
 import copy
 import json
+import multiprocessing as mp
 import os
 import re
 import time
+from tqdm.auto import tqdm
 
 import nltk
 import numpy as np
@@ -764,7 +766,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_s
                 else:
                     continue
 
-        if len(finished) > 100 or time.time() - start_time > 500:
+        if len(finished) > 100 or time.time() - start_time > 30:
             break
 
     return (name, orig_sent, sent, [_[0].cur_str for _ in finished])
@@ -1376,7 +1378,7 @@ class Parser(object):
         position = False
         masked_sent = ''
         position_buf, mention_buf = '', ''
-        mem_num, head_num, mem_str, head_str = [], [], [], []
+        mem_num, head_num, mem_str, head_str, nonlinked_num = [], [], [], [], []
         ent_index = 0
         ent2content = {}
         for n in range(len(sent)):
@@ -1517,25 +1519,52 @@ class Parser(object):
 
             if compare_score >= count_score:
                 if compare_score > 0:
-                    new_tokens.append("<COMPUTE{}>".format(ent_index))
-                    ent2content["<COMPUTE{}>".format(ent_index)] = _
-                    ent_index += 1
                     if head_num:
                         # Bug: If compare_score > 0 and all hdrs in head_num are referenced by some entity in mem_num,
-                        # Then, the current token/word will be completely dropped off from the sentence
+                        # Then, the current token/word will be masked in the sentence but it won't have a corresponding
+                        # mem_num value
+                        flag = False
                         for h in head_num:
                             if any([_[0] == h for _ in mem_num]):
                                 continue
                             else:
                                 mem_num.append((h, num))
+                                flag = True
+                        if flag:
+                            new_tokens.append("<COMPUTE{}>".format(ent_index))
+                            ent2content["<COMPUTE{}>".format(ent_index)] = _
+                            ent_index += 1
+                        else:
+                            new_tokens.append("<NONLINKED{}>".format(ent_index))
+                            ent2content["<NONLINKED{}>".format(ent_index)] = _
+                            ent_index += 1
+                            nonlinked_num.append(("nonlink_num", num))
                     else:
+                        # Bug: If compare_score > 0 and head_num is empty but also all columns are of type str even
+                        # though they may contain some integers. this num token will be masked in the sentence but it
+                        # won't have a corresponding mem_num value
+                        flag = False
                         for col_idx, k in zip(range(len(cols) - 1, -1, -1), cols[::-1]):
                             if mapping[col_idx] == 'num':
                                 mem_num.append((k, num))
                                 head_num.append(k)
+                                flag = True
                                 break
+                        if flag:
+                            new_tokens.append("<COMPUTE{}>".format(ent_index))
+                            ent2content["<COMPUTE{}>".format(ent_index)] = _
+                            ent_index += 1
+                        else:
+                            new_tokens.append("<NONLINKED{}>".format(ent_index))
+                            ent2content["<NONLINKED{}>".format(ent_index)] = _
+                            ent_index += 1
+                            nonlinked_num.append(("nonlink_num", num))
                 else:
-                    new_tokens.append(_)
+                    new_tokens.append("<NONLINKED{}>".format(ent_index))
+                    ent2content["<NONLINKED{}>".format(ent_index)] = _
+                    ent_index += 1
+                    nonlinked_num.append(("nonlink_num", num))
+                    # new_tokens.append(_)
                     continue
             else:
                 if count_score > 0:
@@ -1544,7 +1573,11 @@ class Parser(object):
                     ent_index += 1
                     mem_num.append(("tmp_input", num))
                 else:
-                    new_tokens.append(_)
+                    new_tokens.append("<NONLINKED{}>".format(ent_index))
+                    ent2content["<NONLINKED{}>".format(ent_index)] = _
+                    ent_index += 1
+                    nonlinked_num.append(("nonlink_num", num))
+                    # new_tokens.append(_)
                     continue
 
                     # Correct some wrongly linked count
@@ -1579,7 +1612,7 @@ class Parser(object):
                     head_num.append(k)
                     break
 
-        return " ".join(new_tokens), mem_str, mem_num, head_str, head_num, ent2content
+        return " ".join(new_tokens), mem_str, mem_num, head_str, head_num, nonlinked_num, ent2content
 
     def run(self, table_name, sent, masked_sent, pos_tag, mem_str, mem_num, head_str, head_num):
         t = pandas.read_csv(os.path.join(self.folder, table_name), delimiter="#", encoding='utf-8')
@@ -1595,38 +1628,48 @@ class Parser(object):
         sent, _, pos_tags = self.get_lemmatize(sent, True)
         return sent, pos_tags
 
-    def mask_random_number(self, mem_num, mask_num_ix=None):
+    def mask_random_number(self, mem_num, non_linked_num, mask_num_ix=None):
         new_mem_num = []
-        chose_idx = np.random.choice(len(mem_num), 1)[0]
+        chose_idx = np.random.choice(len(mem_num) + len(non_linked_num), 1)[0]
         if mask_num_ix is not None:
             chose_idx = mask_num_ix
-        for i, (k, v) in enumerate(mem_num):
-            if i != chose_idx:
+        if chose_idx < len(mem_num):
+            for i, (k, v) in enumerate(mem_num):
+                if i != chose_idx:
+                    new_mem_num.append((k, v))
+                    continue
+                if k == 'tmp_input':
+                    new_mem_num.append(('msk_input', v))
+                else:
+                    new_mem_num.append(('msk_' + k, v))
+        else:
+            for i, (k, v) in enumerate(mem_num):
                 new_mem_num.append((k, v))
-                continue
-            if k == 'tmp_input':
-                new_mem_num.append(('msk_input', v))
-            else:
-                new_mem_num.append(('msk_' + k, v))
+            chose_idx -= len(mem_num)
+            new_mem_num.append(('msk_input', non_linked_num[chose_idx][1]))
+
         return new_mem_num
 
     def parse(self, table_name, sent, debug=False, mask_num_ix=None):
         sent, pos_tags = self.normalize(sent)
         raw_sent = " ".join(sent)
         linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
-        masked_sent, mem_str, mem_num, head_str, head_num, mapping = self.initialize_buffer(table_name, linked_sent,
-                                                                                            pos, raw_sent)
+        masked_sent, mem_str, mem_num, head_str, head_num, non_linked_num, mapping = self.initialize_buffer(
+            table_name, linked_sent, pos, raw_sent)
         # memory_num and memory_str are (hdr, val) tuples which serve as arguments for the programs of type num and str
         # resp. Whereas, header_num and header_str are useful for arguments of type header_num and header_str resp.
-        if len(mem_num) == 0:
+        if len(mem_num) + len(non_linked_num) == 0:
             return None
-        mem_num = self.mask_random_number(mem_num, mask_num_ix)
+        mem_num = self.mask_random_number(mem_num, non_linked_num, mask_num_ix)
         if debug:
             print("Input to dynmiac programmer: ", masked_sent, mem_str, mem_num, head_str, head_num)
 
         result = self.run(table_name, raw_sent, masked_sent, pos, mem_str, mem_num, head_str, head_num)
 
-        return result, masked_sent, mapping
+        c = list(set(result))
+        result = [x for x in c if '/True' in x]
+
+        return len(c), result, masked_sent, mapping
 
     def hash_string(self, string):
         import hashlib
@@ -1641,15 +1684,23 @@ class Parser(object):
             sent, pos_tags = self.normalize(sent)
             raw_sent = " ".join(sent)
             linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
-            masked_sent, mem_str, mem_num, head_str, head_num, mapping = self.initialize_buffer(table_name, linked_sent,
-                                                                                                pos, raw_sent)
+            masked_sent, mem_str, mem_num, head_str, head_num, non_linked_num, mapping = self.initialize_buffer(
+                table_name, linked_sent, pos, raw_sent)
+
+            if len(mem_num) + len(non_linked_num) == 0:
+                return None
+
+            mem_num = self.mask_random_number(mem_num, non_linked_num)
 
             result = self.run(table_name, raw_sent, masked_sent, pos, mem_str, mem_num, head_str, head_num)
+            # Filter results to include only True ones
+            c = list(set(result))
+            result = [x for x in c if '/True' in x]
 
             with open('tmp/results/{}.json'.format(hash_id), 'w') as f:
-                json.dump((inputs[1], result, self.title_mapping[table_name]), f, indent=2)
+                json.dump((inputs[0], inputs[1], mem_num, len(c), result), f, indent=2)
 
-            return inputs[1], result, self.title_mapping[table_name]
+            return inputs[0], inputs[1], mem_num, len(c), result
         else:
             with open('tmp/results/{}.json'.format(hash_id), 'r') as f:
                 data = json.load(f)
@@ -1660,8 +1711,8 @@ class Parser(object):
         sent, pos_tags = self.normalize(sent)
         raw_sent = " ".join(sent)
         linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
-        masked_sent, mem_str, mem_num, head_str, head_num, mapping = self.initialize_buffer(table_name, linked_sent,
-                                                                                            pos, raw_sent)
+        masked_sent, mem_str, mem_num, head_str, head_num, non_linked_num, mapping = self.initialize_buffer(
+            table_name, linked_sent, pos, raw_sent)
 
         columns = self.get_table(table_name).columns.to_list()
         indexed_columns = []
@@ -1687,12 +1738,13 @@ def test_1():
     # print(parser.parse('2-12164751-7.html.csv', 'Manchester United and Arsenal both had Value of 1453', True))
 
     # Returns NONE
+    # In this table, a frequence column has words like GhZ which makes it a str column. Then, the sentence consists of
+    # difference over the values in this table. Therefore, the table is not in 1NF.
     # print(parser.parse(
     #     '2-18823880-12.html.csv',
     #     'Core I7 - 2617 M has a Frequency that is 0.2 Ghz less than Core I7 - 2637 M', True))
 
     # In-testing
-
 
     # Failing Cases (No correct programs produced but the program set is not empty)
     # print(parser.parse('2-12164751-7.html.csv', 'Manchester United has 417 more value than real madrid', True))
@@ -1739,5 +1791,28 @@ def test_2():
     return
 
 
+def generate_programs():
+    parser = Parser("data/all_csv")
+
+    with open('data/train_lm.json', 'r') as f:
+        data = json.load(f)
+
+    table_names = []
+    sents = []
+    for k, vs in data.items():
+        for v in vs:
+            table_names.append(k)
+            sents.append(v[0])
+
+    with mp.Pool(mp.cpu_count()) as pool:
+        results = tqdm(pool.imap(parser.distribute_parse, zip(table_names, sents)), total=len(table_names))
+
+    with open("data/progras.json", 'w') as f:
+        json.dump(results, f, indent=2)
+
+    return
+
+
 if __name__ == "__main__":
-    test_1()
+    # test_1()
+    generate_programs()
