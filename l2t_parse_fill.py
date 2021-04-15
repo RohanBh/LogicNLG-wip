@@ -8,14 +8,14 @@ import time
 import nltk
 import numpy as np
 import pandas
+import pandas as pd
 from nltk.corpus import wordnet
-from nltk.metrics.distance import edit_distance
 from nltk.stem import WordNetLemmatizer
 from tqdm.auto import tqdm
 from unidecode import unidecode
 
-from APIs import *
-from l2t_api import obj_compare
+from APIs import non_triggers, fuzzy_match
+from l2t_api import obj_compare, APIs, pat_add, pat_num, pat_month
 
 with open('data/freq_list.json') as f:
     vocab = json.load(f)
@@ -30,114 +30,19 @@ a2b = {a: b for a, b in zip(months_a, months_b)}
 b2a = {b: a for a, b in zip(months_a, months_b)}
 
 
-class ProgramNode(object):
-    def __init__(self, name):
-        self.name = name.strip()
-        self.children = []
-
-    def append_child(self, argument):
-        self.children.append(argument)
-
-    def __str__(self):
-        if len(self.children) == 1:
-            return '{}{{{}}}'.format(self.name, self.children[0])
-        elif len(self.children) == 2:
-            return '{}{{{}; {}}}'.format(self.name, self.children[0], self.children[1])
-        elif len(self.children) == 3:
-            return '{}{{{}; {}; {}}}'.format(self.name, self.children[0], self.children[1], self.children[2])
-        else:
-            raise NotImplementedError
-
-
-def normalize(string):
-    if string.startswith('.'):
-        string = '0' + string
-
-    return string
-
-
-def tree_eq(tree1, tree2):
-    if isinstance(tree1, str) and isinstance(tree2, str):
-        if tree1 == tree2:
-            return True
-        else:
-            tree1 = normalize(tree1)
-            tree2 = normalize(tree2)
-
-            if edit_distance(tree1, tree2) == 1 and len(tree1) >= 3:
-                return True
-            else:
-                if " " + tree1 + " " in " " + tree2 + " " or " " + tree2 + " " in " " + tree1 + " ":
-                    return True
-                else:
-                    return False
-
-    elif isinstance(tree1, ProgramNode) and isinstance(tree2, ProgramNode):
-        if tree1.name == tree2.name:
-            if len(tree1.children) == len(tree2.children):
-                if tree1.name in ['eq', 'and']:
-                    t1 = tree_eq(tree1.children[0], tree2.children[0]) and tree_eq(tree1.children[1], tree2.children[1])
-                    t2 = tree_eq(tree1.children[0], tree2.children[1]) and tree_eq(tree1.children[1], tree2.children[0])
-                    return t1 or t2
-                else:
-                    return all([tree_eq(t1, t2) for t1, t2 in zip(tree1.children, tree2.children)])
-            else:
-                return False
-        else:
-            return False
-    else:
-        return False
-
-
-def recursion(string):
-    stack = []
-    prev = ''
-    if ' ; ' in string:
-        arrays = string.split(' ')
-    else:
-        arrays = split_prog(string)
-    for c in arrays:
-        if c == '{':
-            node = ProgramNode(prev)
-            # if len(stack) == 0:
-            stack.append(node)
-            prev = ''
-        elif c == '}':
-            r = stack.pop(-1)
-            r.append_child(prev)
-            prev = r
-        elif c == ';':
-            try:
-                stack[-1].append_child(prev)
-                prev = ''
-            except Exception:
-                raise ValueError
-        else:
-            if prev == '':
-                prev = c
-            else:
-                prev += " " + c
-    return prev
-
-
-def program_eq(string1, string2):
-    string1 = string1.rstrip('=True').strip()
-    string2 = string2.rstrip('=False').strip()
-    head1 = recursion(string1)
-    head2 = recursion(string2)
-    return tree_eq(head1, head2)
-
-
 class Node(object):
-    def __init__(self, rows, memory_str, memory_num, header_str, header_num, must_have, must_not_have):
+    def __init__(self, rows, memory_str, memory_num, memory_date, header_str,
+                 header_num, header_date, must_have, must_not_have):
         # For intermediate results
         self.memory_str = memory_str
         self.memory_num = memory_num
-        self.memory_bool = []
+        self.memory_date = memory_date
         self.header_str = header_str
         self.header_num = header_num
+        self.header_date = header_date
         self.trace_str = [v for k, v in memory_str]
         self.trace_num = [v for k, v in memory_num]
+        self.trace_date = [v for k, v in memory_date]
         # For intermediate data frame
         self.rows = [("all_rows", rows)]
 
@@ -149,19 +54,7 @@ class Node(object):
         self.must_not_have = must_not_have
 
         self.row_counter = [1]
-        self.check_node()
-
-    def check_node(self):
-        for (k, v) in self.memory_num:
-            if 'msk_' in k:
-                return True
-        raise ValueError(f"Bad Node: {self.memory_num}")
-
-    def get_msk_val(self):
-        for (k, v) in self.memory_num:
-            if 'msk_' in k:
-                return v
-        raise ValueError(f"Bad Node: {self.memory_num}")
+        return
 
     def done(self):
         # if self.memory_str_len == 0 and self.memory_num_len == 0 and \
@@ -178,7 +71,6 @@ class Node(object):
         else:
             return False
 
-    @property
     def tostring(self):
         print("memory_str:", self.memory_str)
         print("memory_num:", self.memory_num)
@@ -205,7 +97,19 @@ class Node(object):
 
     @property
     def memory_num_len(self):
-        return len(self.memory_num) - 1
+        return len(self.memory_num)
+
+    @property
+    def memory_date_len(self):
+        return len(self.memory_date)
+
+    @property
+    def memory_len(self):
+        return len(self.memory_num) + len(self.memory_str) + len(self.memory_date)
+
+    @property
+    def mem_object_len(self):
+        return len(self.memory_num) + len(self.memory_date)
 
     @property
     def tmp_memory_num_len(self):
@@ -217,10 +121,6 @@ class Node(object):
         return len([_ for _ in self.memory_str if "tmp_" in _])
 
     @property
-    def memory_bool_len(self):
-        return len(self.memory_bool)
-
-    @property
     def row_num(self):
         return len(self.rows) - 1
 
@@ -228,35 +128,72 @@ class Node(object):
     def hash(self):
         return hash(frozenset(self.cur_strs))
 
+    @property
+    def headers(self):
+        return self.header_num + self.header_str + self.header_date
+
+    @property
+    def memories(self):
+        return self.memory_num + self.memory_str + self.memory_date
+
+    @property
+    def mem_objects(self):
+        return self.memory_num + self.memory_date
+
+    @property
+    def traces(self):
+        return self.trace_num + self.trace_str + self.trace_date
+
+    @property
+    def mem_obj_traces(self):
+        return self.trace_num + self.trace_date
+
     def append_result(self, command, r):
         self.cur_str = "{}={}".format(command, r)
 
-    def append_bool(self, r):
-        if self.cur_str != "":
-            self.cur_str += ";{}".format(r)
-        else:
-            self.cur_str = "{}".format(r)
-
     def get_memory_str(self, i):
+        i -= self.memory_num_len
         return self.memory_str[i][1]
 
     def get_memory_num(self, i):
         return self.memory_num[i][1]
 
+    def is_mem_num(self, i):
+        if i < self.memory_num_len:
+            return True
+        return False
+
+    def get_memory_type(self, header):
+        # if i < self.memory_num_len:
+        #     return 'num'
+        # if i - self.memory_num_len < self.memory_str_len:
+        #     return 'str'
+        # if i - self.memory_num_len - self.memory_str_len < self.memory_date_len:
+        #     return 'date'
+        # raise ValueError(f'Index out of bounds for memories: {i}')
+        if any(x[0] == header for x in self.memory_num) or any(x == header for x in self.header_num):
+            return 'num'
+        if any(x[0] == header for x in self.memory_str) or any(x == header for x in self.header_str):
+            return 'str'
+        if any(x[0] == header for x in self.memory_date) or any(x == header for x in self.header_date):
+            return 'date'
+        raise ValueError(f"Unseen header: {header}")
+
     def add_memory_num(self, header, val, command):
+        try:
+            val = float(val)
+        except:
+            try:
+                val = int(val)
+            except:
+                pass
         if type(val) == type(1) or type(val) == type(1.2):
             val = val
-        else:
+        elif type(val) is pd.Series:
             val = val.item()
 
         self.memory_num.append((header, val))
         self.trace_num.append(command)
-
-    def add_memory_bool(self, header, val):
-        if isinstance(val, bool):
-            self.memory_bool.append((header, val))
-        else:
-            raise ValueError("type error: {}".format(type(val)))
 
     def add_memory_str(self, header, val, command):
         if isinstance(val, str):
@@ -265,11 +202,33 @@ class Node(object):
         else:
             raise ValueError("type error: {}".format(type(val)))
 
+    def add_memory_date(self, header, val, command):
+        if isinstance(val, str) and len(re.findall(pat_month, val)) > 0:
+            self.memory_date.append((header, val))
+            self.trace_date.append(command)
+        else:
+            raise ValueError(f"type error: {type(val)}, value: {val}")
+
+    def add_memory(self, header, val, command, aux_header=None):
+        if aux_header is None:
+            aux_header = header
+        mem_type = self.get_memory_type(aux_header)
+        if mem_type == 'num':
+            return self.add_memory_num(header, val, command)
+        if mem_type == 'str':
+            return self.add_memory_str(header, val, command)
+        if mem_type == 'date':
+            return self.add_memory_date(header, val, command)
+        return
+
     def add_header_str(self, header):
         self.header_str.append(header)
 
     def add_header_num(self, header):
         self.header_num.append(header)
+
+    def add_header_date(self, header):
+        self.header_date.append(header)
 
     def add_rows(self, header, val):
         if isinstance(val, pandas.DataFrame):
@@ -291,8 +250,6 @@ class Node(object):
         new_trace_num = []
         for k in range(len(self.memory_num)):
             if k in args:
-                if 'msk_' in self.memory_num[k]:
-                    raise ValueError("Removing masked entity")
                 continue
             else:
                 new_mem_num.append(self.memory_num[k])
@@ -314,15 +271,28 @@ class Node(object):
         self.memory_str = new_mem_str
         self.trace_str = new_trace_str
 
-    def delete_memory_bool(self, *args):
-        new_bool = []
-        for k in range(len(self.memory_bool)):
+    def delete_memory_date(self, *args):
+        new_mem_date = []
+        new_trace_date = []
+        for k in range(len(self.memory_date)):
             if k in args:
                 continue
             else:
-                new_bool.append(self.memory_bool[k])
+                new_mem_date.append(self.memory_str[k])
+                new_trace_date.append(self.trace_str[k])
 
-        self.memory_bool = new_bool
+        self.memory_date = new_mem_date
+        self.trace_date = new_trace_date
+
+    def delete_memory(self, h, va):
+        mem_type = self.get_memory_type(h)
+        if mem_type == 'num':
+            return self.delete_memory_num(self.memory_num.index((h, va)))
+        if mem_type == 'str':
+            return self.delete_memory_str(self.memory_str.index((h, va)))
+        if mem_type == 'date':
+            return self.delete_memory_date(self.memory_date.index((h, va)))
+        return
 
     def check(self, *args):
         final = {}
@@ -368,7 +338,8 @@ class Node(object):
         return True
 
 
-def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_str, head_num, num=6, debug=False):
+def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_date, head_str,
+                        head_num, head_date, masked_val, num=6, debug=False):
     must_have = []
     must_not_have = []
     # Goes through non_triggers and absence of any triggers marks those
@@ -414,11 +385,12 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_s
             if not flag:
                 must_not_have.append(k)
 
-    node = Node(memory_str=mem_str, memory_num=mem_num, rows=t,
-                header_str=head_str, header_num=head_num, must_have=must_have, must_not_have=must_not_have)
+    node = Node(memory_str=mem_str, memory_num=mem_num, memory_date=mem_date, rows=t,
+                header_str=head_str, header_num=head_num, header_date=head_date,
+                must_have=must_have, must_not_have=must_not_have)
 
     # Whether a count function should be invoked on all rows?
-    count_all = any([k == 'tmp_input' or k == 'msk_input' for k, v in mem_num])
+    count_all = any([k == 'tmp_input' for k, v in mem_num])
 
     # The result storage
     finished = []
@@ -448,8 +420,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_s
         for root in hist[step]:
             # Iterate over API
             for k, v in APIs.items():
-                # if k not in ['eq', 'str_hop', 'num_hop', 'filter_str_eq', 'filter_eq', 'count']:
-                #     continue
+
                 # propose candidates
                 if k in root.must_not_have or not root.check(*v['argument']):
                     continue
@@ -465,31 +436,34 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_s
                 if v['output'] == 'bool':
                     continue
 
-                # Incrementing/Decrementing/Whether is zero
-                if v['argument'] == ["num"]:
-                    for i, (h, va) in enumerate(root.memory_num):
-                        if 'msk_' in h:
-                            continue
-                        if v['output'] == 'num':
+                # Incrementing/Decrementing
+                if v['argument'] == ["any"]:
+                    for i, (h, va) in enumerate(root.memories):
+                        if v['output'] == 'any':
                             if step == 0 and "tmp" in h:
-                                command = v['tostr'](root.trace_num[i])
+                                command = v['tostr'](root.traces[i])
                                 if not root.exist(command):
                                     tmp = root.clone(command, k)
                                     returned = call(command, v['function'], va)
+                                    # if tmp.done():
+                                    #     tmp.append_result(
+                                    #         command,
+                                    #         f'{returned}/' + str(f'{root.get_msk_val():.3f}' == f'{returned:.3f}'))
+                                    #     finished.append((tmp, returned))
+                                    # else:
+                                    #     tmp.add_memory_num(h, returned, returned)
+                                    #     conditional_add(tmp, hist[step + 1])
                                     if tmp.done():
-                                        tmp.append_result(
-                                            command,
-                                            f'{returned}/' + str(f'{root.get_msk_val():.3f}' == f'{returned:.3f}'))
-                                        finished.append((tmp, returned))
+                                        continue
                                     else:
-                                        tmp.add_memory_num(h, returned, returned)
+                                        tmp.add_memory(h, returned, returned)
                                         conditional_add(tmp, hist[step + 1])
                         elif v['output'] == 'none':
                             if step == 0 and "tmp" in h:
-                                command = v['tostr'](root.trace_num[i])
+                                command = v['tostr'](root.traces[i])
                                 if not root.exist(command):
                                     tmp = root.clone(command, k)
-                                    tmp.delete_memory_num(i)
+                                    tmp.delete_memory(h, va)
                                     if tmp.done():
                                         continue
                                     else:
@@ -497,31 +471,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_s
                         else:
                             raise ValueError("Returned Type Wrong")
 
-                # Incrementing/Decrementing/Whether is none
-                elif v['argument'] == ["str"]:
-                    for i, (h, va) in enumerate(root.memory_str):
-                        if v['output'] == 'str':
-                            if step == 0:
-                                if "tmp_" not in h:
-                                    command = v['tostr'](root.trace_str[i])
-                                    if not root.exist(command):
-                                        tmp = root.clone(command, k)
-                                        returned = call(command, v['function'], va)
-                                        tmp.add_memory_str(h, returned, returned)
-                                        conditional_add(tmp, hist[step + 1])
-                        elif v['output'] == 'none':
-                            if step == 0:
-                                command = v['tostr'](root.trace_str[i])
-                                if not root.exist(command):
-                                    tmp = root.clone(command, k)
-                                    tmp.delete_memory_str(i)
-                                    if tmp.done():
-                                        continue
-                                    else:
-                                        conditional_add(tmp, hist[step + 1])
-                        else:
-                            raise ValueError("Returned Type Wrong")
-
+                # Count
                 elif v['argument'] == ['row']:
                     for j, (row_h, row) in enumerate(root.rows):
                         if k == "count":
@@ -532,12 +482,8 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_s
                                     pass
                                 else:
                                     continue
-                        elif k == "only":
-                            if not row_h.startswith('filter'):
-                                continue
                         else:
-                            if not row_h == "all_rows":
-                                continue
+                            raise NotImplementedError(f"Unk func {k} in APIs")
                         command = v['tostr'](row_h)
                         if not root.exist(command):
                             tmp = root.clone(command, k)
@@ -547,63 +493,58 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_s
                                 if tmp.done():
                                     tmp.append_result(
                                         command,
-                                        f'{returned}/' + str(f'{root.get_msk_val():.3f}' == f'{returned:.3f}'))
+                                        f'{returned}/' + str(f'{obj_compare(masked_val[1], returned)}'))
                                     finished.append((tmp, returned))
                                 else:
                                     tmp.add_memory_num("tmp_count", returned, command)
                                     conditional_add(tmp, hist[step + 1])
-                            elif v['output'] == 'row':
-                                tmp.add_rows(command, returned)
-                                conditional_add(tmp, hist[step + 1])
                             else:
                                 raise ValueError("error, out of scope")
 
-                elif v['argument'] == ['row', 'header_num']:
+                # hop, max, min, argmax, argmin,
+                elif v['argument'] == ['row', 'header']:
                     if "hop" in k:
                         for j, (row_h, row) in enumerate(root.rows):
                             if len(row) != 1:
                                 continue
-                            for l in range(len(root.header_num)):
-                                command = v['tostr'](row_h, root.header_num[l])
-                                if "; " + root.header_num[l] + ";" in row_h:
+                            for l in range(len(root.headers)):
+                                command = v['tostr'](row_h, root.headers[l])
+                                if "; " + root.headers[l] + ";" in row_h:
                                     continue
                                 if not root.exist(command):
                                     tmp = root.clone(command, k)
                                     tmp.inc_row_counter(j)
-                                    returned = call(command, v['function'], row, root.header_num[l])
-                                    if v['output'] == 'num':
-                                        if tmp.done():
-                                            tmp.append_result(
-                                                command,
-                                                f'{returned}/' + str(f'{root.get_msk_val():.3f}' == f'{returned:.3f}'))
-                                            finished.append((tmp, returned))
-                                        else:
-                                            tmp.add_memory_num("tmp_" + root.header_num[l], returned, command)
-                                            conditional_add(tmp, hist[step + 1])
+                                    returned = call(command, v['function'], row, root.headers[l])
+                                    if tmp.done():
+                                        tmp.append_result(
+                                            command,
+                                            f'{returned}/' + str(f'{obj_compare(masked_val[1], returned)}'))
+                                        finished.append((tmp, returned))
                                     else:
-                                        raise ValueError("error, output of scope")
+                                        tmp.add_memory("tmp_" + root.headers[l], returned, command, root.headers[l])
+                                        conditional_add(tmp, hist[step + 1])
                     else:
                         for j, (row_h, row) in enumerate(root.rows):
                             if len(row) == 1:
                                 continue
-                            for l in range(len(root.header_num)):
-                                command = v['tostr'](row_h, root.header_num[l])
+                            for l in range(len(root.headers)):
+                                command = v['tostr'](row_h, root.headers[l])
                                 if not root.exist(command):
                                     tmp = root.clone(command, k)
                                     tmp.inc_row_counter(j)
                                     # It does not make sense to do min/max over one line
-                                    if any([_ in k for _ in ['max', 'min']]) and len(row) == 1:
+                                    if any([_ in k for _ in ['max', 'min', 'argmax', 'argmin']]) and len(row) == 1:
                                         continue
 
-                                    returned = call(command, v['function'], row, root.header_num[l])
-                                    if v['output'] == 'num':
+                                    returned = call(command, v['function'], row, root.headers[l])
+                                    if v['output'] == 'obj':
                                         if tmp.done():
                                             tmp.append_result(
                                                 command,
-                                                f'{returned}/' + str(f'{root.get_msk_val():.3f}' == f'{returned:.3f}'))
+                                                f'{returned}/' + str(f'{obj_compare(masked_val[1], returned)}'))
                                             finished.append((tmp, returned))
                                         else:
-                                            tmp.add_memory_num("tmp_" + root.header_num[l], returned, command)
+                                            tmp.add_memory("tmp_" + root.headers[l], returned, command, root.headers[l])
                                             conditional_add(tmp, hist[step + 1])
                                     elif v['output'] == 'row':
                                         if len(returned) > 0:
@@ -614,117 +555,81 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_s
                                     else:
                                         raise ValueError("error, output of scope")
 
-                elif v['argument'] == ['row', 'header_str']:
-                    if "most_freq" in k:
-                        row_h, row = root.rows[0]
-                        for l in range(len(root.header_str)):
-                            command = v['tostr'](row_h, root.header_str[l])
+                # avg, sum
+                elif v['argument'] == ['row', 'header_num']:
+                    for j, (row_h, row) in enumerate(root.rows):
+                        if len(row) == 1:
+                            continue
+                        for l in range(len(root.header_num)):
+                            command = v['tostr'](row_h, root.header_num[l])
                             if not root.exist(command):
                                 tmp = root.clone(command, k)
-                                returned = call(command, v['function'], row, root.header_str[l])
-                                if v['output'] == 'str':
-                                    if returned is not None:
-                                        tmp.add_memory_str("tmp_" + root.header_str[l], returned, command)
+                                tmp.inc_row_counter(j)
+
+                                returned = call(command, v['function'], row, root.header_num[l])
+                                if v['output'] == 'num':
+                                    if tmp.done():
+                                        tmp.append_result(
+                                            command,
+                                            f'{returned}/' + str(f'{obj_compare(masked_val[1], returned, True)}'))
+                                        finished.append((tmp, returned))
+                                    else:
+                                        tmp.add_memory_num("tmp_" + root.header_num[l], returned, command)
                                         conditional_add(tmp, hist[step + 1])
                                 else:
                                     raise ValueError("error, output of scope")
 
-                    elif "hop" in k:
-                        for j, (row_h, row) in enumerate(root.rows):
-                            if len(row) != 1:
-                                continue
-                            for l in range(len(root.header_str)):
-                                if "; " + root.header_str[l] + ";" in row_h:
-                                    continue
-                                command = v['tostr'](row_h, root.header_str[l])
-                                if not root.exist(command):
-                                    tmp = root.clone(command, k)
-                                    tmp.inc_row_counter(j)
-                                    returned = call(command, v['function'], row, root.header_str[l])
-                                    if v['output'] == 'str':
-                                        if isinstance(returned, str):
-                                            if is_number(returned):
-                                                returned = float(returned)
-                                                tmp.add_memory_num("tmp_" + root.header_str[l], returned, command)
-                                            else:
-                                                tmp.add_memory_str("tmp_" + root.header_str[l], returned, command)
-                                            conditional_add(tmp, hist[step + 1])
-                                    else:
-                                        raise ValueError("error, output of scope")
-                    else:
-                        for j, (row_h, row) in enumerate(root.rows):
-                            if len(row) == 1:
-                                continue
-                            for l in range(len(root.header_str)):
-                                command = v['tostr'](row_h, root.header_str[l])
-                                if not root.exist(command):
-                                    tmp = root.clone(command, k)
-                                    tmp.inc_row_counter(j)
-                                    returned = call(command, v['function'], row, root.header_str[l])
-                                    if v['output'] == 'str':
-                                        if isinstance(returned, str):
-                                            tmp.add_memory_str("tmp_" + root.header_str[l], returned, command)
-                                            conditional_add(tmp, hist[step + 1])
-                                    elif v['output'] == 'row':
-                                        if len(returned) > 0:
-                                            tmp.add_rows(command, returned)
-                                            conditional_add(tmp, hist[step + 1])
-                                        else:
-                                            continue
-                                    elif v['output'] == 'num':
-                                        if tmp.done():
-                                            tmp.append_result(
-                                                command,
-                                                f'{returned}/' + str(f'{root.get_msk_val():.3f}' == f'{returned:.3f}'))
-                                            finished.append((tmp, returned))
-                                        else:
-                                            tmp.add_memory_num("tmp_count", returned, command)
-                                            conditional_add(tmp, hist[step + 1])
-                                    else:
-                                        raise ValueError("error, output of scope")
-
-                elif v['argument'] == ['num', 'num']:
-                    if root.memory_num_len < 2:
+                # diff
+                elif v['argument'] == ['obj', 'obj']:
+                    if root.mem_object_len < 2:
                         continue
-                    for l in range(0, root.memory_num_len - 1):
-                        for m in range(l + 1, root.memory_num_len):
-                            if 'msk_' in root.memory_num[l][0] or 'msk_' in root.memory_num[m][0]:
+                    for l in range(0, root.mem_object_len - 1):
+                        for m in range(l + 1, root.mem_object_len):
+                            if root.mem_objects[l][0] == 'ntharg' or root.mem_objects[m][0] == 'ntharg':
                                 continue
-                            if 'tmp_' in root.memory_num[l][0] or 'tmp_' in root.memory_num[m][0]:
-                                if ("tmp_input" == root.memory_num[l][0] and "tmp_" not in root.memory_num[m][0]) or \
-                                        ("tmp_input" == root.memory_num[m][0] and "tmp_" not in root.memory_num[l][0]):
+                            if 'tmp_' in root.mem_objects[l][0] or 'tmp_' in root.mem_objects[m][0]:
+                                if ("tmp_input" == root.mem_objects[l][0] and "tmp_" not in root.mem_objects[m][0]) or \
+                                        ("tmp_input" == root.mem_objects[m][0] and "tmp_" not in root.mem_objects[l][
+                                            0]):
                                     continue
-                                elif root.memory_num[l][0] == root.memory_num[m][0] == "tmp_input":
+                                elif root.mem_objects[l][0] == root.mem_objects[m][0] == "tmp_input":
                                     continue
                             else:
                                 continue
 
-                            type_l = root.memory_num[l][0].replace('tmp_', '')
-                            type_m = root.memory_num[m][0].replace('tmp_', '')
-                            if v['output'] == 'num':
+                            type_l = root.mem_objects[l][0].replace('tmp_', '')
+                            type_m = root.mem_objects[m][0].replace('tmp_', '')
+                            if v['output'] == 'obj':
                                 if type_l == type_m:
                                     # Two direction:
                                     for dir1, dir2 in zip([l, m], [m, l]):
-                                        command = v['tostr'](root.trace_num[dir1], root.trace_num[dir2])
-                                        tmp = root.clone(command, k)
-                                        tmp.delete_memory_num(dir1, dir2)
-                                        returned = call(command, v['function'],
-                                                        root.get_memory_num(dir1), root.get_memory_num(dir2))
-                                        if tmp.done():
-                                            tmp.append_result(
-                                                command,
-                                                f'{returned}/' + str(f'{root.get_msk_val():.3f}' == f'{returned:.3f}'))
-                                            finished.append((tmp, returned))
-                                        else:
-                                            tmp.add_memory_num("tmp_" + root.memory_num[dir1][0], returned, command)
-                                            conditional_add(tmp, hist[step + 1])
+                                        command = v['tostr'](root.mem_obj_traces[dir1], root.mem_obj_traces[dir2])
+                                        if not root.exist(command):
+                                            tmp = root.clone(command, k)
+                                            tmp.delete_memory(*root.mem_objects[l])
+                                            tmp.delete_memory(*root.mem_objects[m])
+                                            returned = call(command, v['function'],
+                                                            root.mem_objects[l][1], root.mem_objects[l][1])
+                                            if tmp.done():
+                                                tmp.append_result(
+                                                    command,
+                                                    f'{returned}/' + str(f'{obj_compare(masked_val[1], returned)}'))
+                                                finished.append((tmp, returned))
+                                            else:
+                                                tmp.add_memory("tmp_" + root.memory_num[dir1][0], returned,
+                                                               command, root.memory_num[dir1][0])
+                                                conditional_add(tmp, hist[step + 1])
                             else:
                                 raise ValueError("error, output of scope")
 
-                elif v['argument'] == ['row', ['header_str', 'str']]:
+                # filter_str_eq or filter_str_not_eq
+                elif v['argument'] == ['row', 'header_str', 'str']:
                     for j, (row_h, row) in enumerate(root.rows):
+                        # It does not make sense to do filter operation on one row
+                        if len(row) == 1:
+                            continue
                         for i, (h, va) in enumerate(root.memory_str):
-                            if "tmp_" not in h:
+                            if "tmp_" not in h and h != 'ntharg':
                                 command = v['tostr'](row_h, h, root.trace_str[i])
                                 if not root.exist(command):
                                     tmp = root.clone(command, k)
@@ -740,20 +645,20 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_s
                                     else:
                                         raise ValueError('error, output of scope')
 
-                elif v['argument'] == ['row', ['header_num', 'num']]:
+                # filter_eq
+                elif v['argument'] == ['row', 'header', 'obj']:
                     for j, (row_h, row) in enumerate(root.rows):
-                        # It does not make sense to do filter/all operation on one row
+                        # It does not make sense to do filter operation on one row
                         if len(row) == 1:
                             continue
-                        for i, (h, va) in enumerate(root.memory_num):
-                            if 'msk_' in h:
-                                continue
-                            if "tmp_" not in h:
-                                command = v['tostr'](row_h, h, root.trace_num[i])
+                        for i, (h, va) in enumerate(root.mem_objects):
+                            if "tmp_" not in h and h != 'ntharg':
+                                command = v['tostr'](row_h, h, root.mem_obj_traces[i])
                                 if not root.exist(command):
                                     tmp = root.clone(command, k)
                                     tmp.inc_row_counter(j)
-                                    tmp.delete_memory_num(tmp.memory_num.index((h, va)))
+                                    tmp.delete_memory(h, va)
+
                                     returned = call(command, v['function'], row, h, va)
                                     if v['output'] == 'row':
                                         if len(returned) > 0:
@@ -764,6 +669,40 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_s
                                     else:
                                         raise ValueError('error, output of scope')
 
+                # nth_argmax, nth_max
+                elif v['argument'] == ['row', 'header', 'num']:
+                    for j, (row_h, row) in enumerate(root.rows):
+                        # It does not make sense to do max/argmax operation on one row
+                        if len(row) == 1:
+                            continue
+                        for l in range(len(root.headers)):
+                            for _h, va in root.mem_objects:
+                                if _h != 'ntharg':
+                                    continue
+                                command = v['tostr'](row_h, root.headers[l], va)
+                                if not root.exist(command):
+                                    tmp = root.clone(command, k)
+                                    tmp.inc_row_counter(j)
+
+                                    returned = call(command, v['function'], row, root.headers[l], va)
+                                    if v['output'] == 'obj':
+                                        if tmp.done():
+                                            tmp.append_result(
+                                                command,
+                                                f'{returned}/' + str(f'{obj_compare(masked_val[1], returned)}'))
+                                            finished.append((tmp, returned))
+                                        else:
+                                            tmp.add_memory("tmp_" + root.headers[l], returned, command, root.headers[l])
+                                            conditional_add(tmp, hist[step + 1])
+                                    elif v['output'] == 'row':
+                                        if len(returned) > 0:
+                                            tmp.add_rows(command, returned)
+                                            conditional_add(tmp, hist[step + 1])
+                                        else:
+                                            continue
+                                    else:
+                                        raise ValueError("error, output of scope")
+
                 else:
                     continue
 
@@ -771,10 +710,6 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, head_s
             break
 
     return (name, orig_sent, sent, [_[0].cur_str for _ in finished])
-
-
-def is_ascii(s):
-    return all(ord(c) < 128 for c in s)
 
 
 def augment(s):
@@ -937,41 +872,6 @@ def get_closest(inp, string, indexes, tabs, threshold):
         return None
 
 
-def split_prog(string, merge_words=False):
-    array = []
-    tmp = ''
-    if '=True' in string:
-        result = True
-        string.rstrip('=True')
-    elif '=False' in string:
-        result = False
-        string.rstrip('=False')
-    else:
-        result = None
-
-    for s in string:
-        if s == '{' or s == ';' or s == '}':
-            if tmp:
-                array.append(tmp)
-                tmp = ''
-            array.append(s)
-        elif s == ' ':
-            if tmp:
-                if merge_words:
-                    tmp += s
-                    continue
-                else:
-                    array.append(tmp)
-                    tmp = ''
-        else:
-            tmp += s
-
-    if result is not None:
-        return array, result
-    else:
-        return array
-
-
 def replace_number(string):
     string = re.sub(r'(\b)zero(\b)', r'\g<1>0\g<2>', string)
     string = re.sub(r'(\b)one(\b)', r'\g<1>1\g<2>', string)
@@ -1009,15 +909,6 @@ def replace(w, transliterate):
         return transliterate[w]
     else:
         return w
-
-
-def intersect(w_new, w_old):
-    new_set = []
-    for w_1 in w_new:
-        for w_2 in w_old:
-            if w_1[:2] == w_2[:2] and w_1[2] > w_2[2]:
-                new_set.append(w_2)
-    return new_set
 
 
 def recover(buf, recover_dict, content):
@@ -1151,14 +1042,7 @@ def is_number(s):
 
 
 def isnumber(string):
-    return string in [numpy.dtype('int64'), numpy.dtype('int32'), numpy.dtype('float32'), numpy.dtype('float64')]
-
-
-def list2tuple(inputs):
-    mem = []
-    for s in inputs:
-        mem.append(tuple(s))
-    return mem
+    return string in [np.dtype('int64'), np.dtype('int32'), np.dtype('float32'), np.dtype('float64')]
 
 
 def split(string, option):
@@ -1369,18 +1253,40 @@ class Parser(object):
         # entity. For a COMPUTE token, it tries to link it with a table header but is inconsistent. It fails to link it
         # in some cases (case not covered in the code).
         count = 0
-        preprocessed = []
 
         t = self.get_table(table_name)
         cols = t.columns
-        mapping = {i: "num" if isnumber(t) else "str" for i, t in enumerate(t.dtypes)}
+
+        def get_col_types():
+            col2type = {}
+            for i, col in enumerate(t.columns):
+                if isnumber(t[col].dtype):
+                    col2type[i] = 'num'
+                    continue
+                col_series = t[col].astype('str')
+                pats = col_series.str.extract(pat_add, expand=False)
+                if pats.isnull().all():
+                    pats = col_series.str.extract(pat_num, expand=False)
+                if not pats.isnull().all():
+                    col2type[i] = 'num'
+                    continue
+                date_pats = col_series.str.extract(pat_month, expand=False)
+                if not date_pats.isnull().all():
+                    col2type[i] = 'date'
+                    continue
+                col2type[i] = 'str'
+
+            return col2type
+
+        # mapping = {i: "num" if isnumber(t) else "str" for i, t in enumerate(t.dtypes)}
+        mapping = get_col_types()
 
         count += 1
         inside = False
         position = False
         masked_sent = ''
         position_buf, mention_buf = '', ''
-        mem_num, head_num, mem_str, head_str, nonlinked_num = [], [], [], [], []
+        mem_num, head_num, mem_str, head_str, mem_date, head_date, nonlinked_num = [[] for _ in range(7)]
         ent_index = 0
         ent2content = {}
         for n in range(len(sent)):
@@ -1391,9 +1297,14 @@ class Parser(object):
                         if mapping[idx] == 'num':
                             if cols[idx] not in head_num:
                                 head_num.append(cols[idx])
-                        else:
+                        elif mapping[idx] == 'str':
                             if cols[idx] not in head_str:
                                 head_str.append(cols[idx])
+                        elif mapping[idx] == 'date':
+                            if cols[idx] not in head_date:
+                                head_date.append(cols[idx])
+                        else:
+                            raise ValueError(f"Unsupported col type: {mapping[idx]}")
                     else:
                         row = int(split(position_buf, "row"))
                         idx = int(split(position_buf, "col"))
@@ -1411,13 +1322,18 @@ class Parser(object):
                                 val = (cols[idx], mention_buf)
                                 if val not in mem_num:
                                     mem_num.append(val)
-                            else:
+                            elif mapping[idx] == 'str':
                                 if len(fuzzy_match(t, cols[idx], mention_buf)) == 0:
                                     val = (cols[idx], mention_buf)
                                 else:
                                     val = (cols[idx], mention_buf)
                                 if val not in mem_str:
                                     mem_str.append(val)
+                            elif mapping[idx] == 'date':
+                                val = cols[idx], mention_buf
+                                mem_date.append(val)
+                            else:
+                                raise ValueError(f"Unsupported col type: {mapping[idx]}")
                     # Direct matching
                     masked_sent += "<ENTITY{}>".format(ent_index)
                     ent2content["<ENTITY{}>".format(ent_index)] = str(mention_buf)
@@ -1452,7 +1368,23 @@ class Parser(object):
                     new_tokens.append(_)
                     continue
             else:
-                new_tokens.append(_)
+                pat = r'\d(th|nd|rd)'
+                _ = _.replace('first', '1st').replace('second', '2nd').replace('third', '3rd').replace(
+                    'fourth', '4th').replace('fifth', '5th').replace('sixth', '6th').replace('seventh', '7th').replace(
+                    'eighth', '8th').replace('ninth', '9th')
+                if len(re.findall(pat, _)) > 0:
+                    reres = re.findall(r'(\d+)(th|nd|rd)', _)
+                    if len(reres) == 0:
+                        new_tokens.append(_)
+                        continue
+                    # first number in the first matched group
+                    num = reres[0][0]
+                    new_tokens.append("<NARG{}>".format(ent_index))
+                    ent2content["<NARG{}>".format(ent_index)] = _
+                    ent_index += 1
+                    mem_num.append(("ntharg", num))
+                else:
+                    new_tokens.append(_)
                 continue
 
             # Reason whether the number is a comparison or a count
@@ -1615,13 +1547,15 @@ class Parser(object):
                     head_num.append(k)
                     break
 
-        return " ".join(new_tokens), mem_str, mem_num, head_str, head_num, nonlinked_num, ent2content
+        return (" ".join(new_tokens), mem_str, mem_num, mem_date,
+                head_str, head_num, head_date, nonlinked_num, ent2content)
 
-    def run(self, table_name, sent, masked_sent, pos_tag, mem_str, mem_num, head_str, head_num):
+    def run(self, table_name, sent, masked_sent, pos_tag, mem_str, mem_num,
+            mem_date, head_str, head_num, head_date, masked_val):
         t = pandas.read_csv(os.path.join(self.folder, table_name), delimiter="#", encoding='utf-8')
         t.fillna('')
         res = dynamic_programming(table_name, t, sent, masked_sent, pos_tag, mem_str,
-                                  mem_num, head_str, head_num, 7)
+                                  mem_num, mem_date, head_str, head_num, head_date, masked_val, 7)
         return res[-1]
 
     def normalize(self, sent):
@@ -1678,19 +1612,40 @@ class Parser(object):
         sent, pos_tags = self.normalize(og_sent)
         raw_sent = " ".join(sent)
         linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
-        masked_sent, mem_str, mem_num, head_str, head_num, non_linked_num, mapping = self.initialize_buffer(
-            table_name, linked_sent, pos, raw_sent)
+        # mem_str, mem_num, mem_date, head_str, head_num, head_date,
+        ret_val = self.initialize_buffer(table_name, linked_sent, pos, raw_sent)
+        masked_sent, mem_str, mem_num, mem_date, head_str, head_num, head_date, non_linked_num, mapping = ret_val
         # memory_num and memory_str are (hdr, val) tuples which serve as arguments for the programs of type num and str
         # resp. Whereas, header_num and header_str are useful for arguments of type header_num and header_str resp.
         # if len(mem_num) + len(non_linked_num) == 0:
         #     return None
         # mem_num = self.mask_random_number(mem_num, non_linked_num, mask_num_ix)
         masked_val = self.mask_highest_lo_entity(mem_num, mem_str, non_linked_num, logic_json)
-        if debug:
-            print("Input to dynmiac programmer: ", og_sent, masked_sent, mem_str, mem_num, head_str, head_num, masked_val)
-        return masked_val
 
-        result = self.run(table_name, raw_sent, masked_sent, pos, mem_str, mem_num, head_str, head_num)
+        if masked_val is None:
+            return
+
+        def get_old_val(_x):
+            return 'tmp_input' if _x == 'msk_input' else _x[4:]
+
+        def remove_h(_h, _mem):
+            new_mem = []
+            for (__h, _v) in _mem:
+                if __h == _h:
+                    continue
+                new_mem.append((__h, _v))
+            return new_mem
+
+        og_val = get_old_val(masked_val[0])
+        mem_str, mem_num, mem_date = remove_h(og_val, mem_str), remove_h(og_val, mem_num), remove_h(og_val, mem_date)
+
+        if debug:
+            print(f"Input to dynmiac programmer:\nog_sent: {og_sent}"
+                  f"\nmasked: {masked_sent}\nmem_str, mem_num, mem_date: {mem_str, mem_num, mem_date}"
+                  f"\nhead_str, head_num, head_date: {head_str, head_num, head_date}, masked_val: {masked_val}")
+
+        result = self.run(table_name, raw_sent, masked_sent, pos, mem_str, mem_num,
+                          mem_date, head_str, head_num, head_date, masked_val)
 
         c = list(set(result))
         result = [x for x in c if '/True' in x]
@@ -1732,25 +1687,6 @@ class Parser(object):
                 data = json.load(f)
             return data
 
-    def preprocess(self, inputs):
-        table_name, sent = inputs
-        sent, pos_tags = self.normalize(sent)
-        raw_sent = " ".join(sent)
-        linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
-        masked_sent, mem_str, mem_num, head_str, head_num, non_linked_num, mapping = self.initialize_buffer(
-            table_name, linked_sent, pos, raw_sent)
-
-        columns = self.get_table(table_name).columns.to_list()
-        indexed_columns = []
-        for m in head_str + head_num:
-            if m in columns:
-                indexed_columns.append(columns.index(m))
-        if len(indexed_columns) == 0:
-            indexed_columns = [0, 1, 2]
-            assert len(columns) >= 3, "too few columns"
-
-        return indexed_columns, masked_sent
-
 
 def test_1():
     def get_logic_json(tbl, sent):
@@ -1765,8 +1701,27 @@ def test_1():
 
     parser = Parser("data/l2t/all_csv")
 
-    def parse_it(tbl, sent):
-        return parser.parse(tbl, sent, get_logic_json(tbl, sent), True)
+    def parse_it(tbl, sent, alt_sent=None):
+        if alt_sent is None:
+            alt_sent = sent
+        return parser.parse(tbl, alt_sent, get_logic_json(tbl, sent), True)
+
+    # parse_it("2-14173105-18.html.csv",
+    #          "in the 1999-2000 philadelphia flyers season , the player who was selected 2nd is jeff feniak .")
+
+    # Warning about regex
+    # parse_it("2-12326046-2.html.csv",
+    #          "the opole tournament was the only one in which ana jovanovi\u0107 used a carpet ( i ) surface .")
+
+    # print(parse_it("2-11963536-8.html.csv",
+    #                "the match on 16 march 2008 had the highest attendance of all the matches ."))
+
+    # No programs
+    print(parse_it("1-2417445-4.html.csv",
+                   "in the 54th united states congress , of the successors that took office in 1895 ,"
+                   " the only time that the vacancy was due to a resignation was when the vacator was "
+                   "edwin j jordan ."))
+
     return
 
 
@@ -1775,7 +1730,7 @@ def test_2():
         data = json.load(f)
     entry = data[np.random.choice(len(data), 1)[0]]
     sent = entry['sent']
-    table = entry['url'][entry['url'].find('all_csv/')+8:]
+    table = entry['url'][entry['url'].find('all_csv/') + 8:]
     logic_json = entry['logic']
 
     parser = Parser("data/l2t/all_csv")

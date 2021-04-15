@@ -12,3 +12,4 @@ parser_models.zip
 parser_models/
 tensorboard/*
 *~
+data/l2t/

@@ -8,6 +8,16 @@ APIs = {}
 
 # With only one argument
 
+APIs['inc'] = {"argument": ['any'], 'output': 'any',
+               "function": lambda t: t,
+               "tostr": lambda t: "inc{{ {} }}".format(t),
+               'append': False}
+
+APIs['dec'] = {"argument": ['any'], 'output': 'none',
+               "function": lambda t: None,
+               "tostr": lambda t: "dec{{ {} }}".format(t),
+               'append': False}
+
 ### count
 APIs['count'] = {"argument": ['row'], 'output': 'num',
                  'function': lambda t: len(t),
@@ -21,22 +31,22 @@ APIs['only'] = {"argument": ['row'], 'output': 'bool',
                 'append': None}
 
 # With only two argument and the first is row
-APIs['str_hop'] = {"argument": ['row', 'header'], 'output': 'str',
-                   'function': lambda t, col: hop_op(t, col),
-                   'tostr': lambda t, col: "hop {{ {} ; {} }}".format(t, col),
-                   'append': True}
+APIs['hop'] = {"argument": ['row', 'header'], 'output': 'obj',
+               'function': lambda t, col: hop_op(t, col),
+               'tostr': lambda t, col: "hop {{ {} ; {} }}".format(t, col),
+               'append': True}
 
-APIs['num_hop'] = {"argument": ['row', 'header'], 'output': 'obj',
-                   'function': lambda t, col: hop_op(t, col),
-                   'tostr': lambda t, col: "hop {{ {} ; {} }}".format(t, col),
-                   'append': True}
+# APIs['num_hop'] = {"argument": ['row', 'header'], 'output': 'num',
+#                    'function': lambda t, col: hop_op(t, col),
+#                    'tostr': lambda t, col: "hop {{ {} ; {} }}".format(t, col),
+#                    'append': True}
 
-APIs['avg'] = {"argument": ['row', 'header'], 'output': 'num',
-               "function": lambda t, col: agg(t, col, "mean"),
+APIs['avg'] = {"argument": ['row', 'header_num'], 'output': 'num',
+               "function": lambda t, col: agg(t, col, "avg"),
                "tostr": lambda t, col: "avg {{ {} ; {} }}".format(t, col),
                'append': True}
 
-APIs['sum'] = {"argument": ['row', 'header'], 'output': 'num',
+APIs['sum'] = {"argument": ['row', 'header_num'], 'output': 'num',
                "function": lambda t, col: agg(t, col, "sum"),
                "tostr": lambda t, col: "sum {{ {} ; {} }}".format(t, col),
                'append': True}
@@ -72,18 +82,18 @@ APIs['nth_argmin'] = {"argument": ['row', 'header', 'num'], 'output': 'row',
                       'tostr': lambda t, col, ind: "nth_argmin {{ {} ; {} ; {} }}".format(t, col, ind),
                       'append': False}
 
-APIs['nth_max'] = {"argument": ['row', 'header', 'num'], 'output': 'num',
+APIs['nth_max'] = {"argument": ['row', 'header', 'num'], 'output': 'obj',
                    "function": lambda t, col, ind: nth_maxmin(t, col, order=ind, max_or_min="max", arg=False),
                    "tostr": lambda t, col, ind: "nth_max {{ {} ; {} ; {} }}".format(t, col, ind),
                    'append': True}
 
-APIs['nth_min'] = {"argument": ['row', 'header', 'num'], 'output': 'num',
+APIs['nth_min'] = {"argument": ['row', 'header', 'num'], 'output': 'obj',
                    "function": lambda t, col, ind: nth_maxmin(t, col, order=ind, max_or_min="min", arg=False),
                    "tostr": lambda t, col, ind: "nth_min {{ {} ; {} ; {} }}".format(t, col, ind),
                    'append': True}
 
 # With only two argument and the first is not row
-APIs['diff'] = {"argument": ['obj', 'obj'], 'output': 'str',
+APIs['diff'] = {"argument": ['obj', 'obj'], 'output': 'obj',
                 'function': lambda t1, t2: obj_compare(t1, t2, type="diff"),
                 'tostr': lambda t1, t2: "diff {{ {} ; {} }}".format(t1, t2),
                 'append': True}
@@ -130,12 +140,12 @@ APIs['and'] = {"argument": ['bool', 'bool'], 'output': 'bool',
 
 # With only three argument and the first is row
 # str
-APIs["filter_str_eq"] = {"argument": ['row', 'header', 'str'], "output": "row",
+APIs["filter_str_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "row",
                          "function": lambda t, col, value: fuzzy_match_filter(t, col, value),
                          "tostr": lambda t, col, value: "filter_eq {{ {} ; {} ; {} }}".format(t, col, value),
                          'append': False}
 
-APIs["filter_str_not_eq"] = {"argument": ['row', 'header', 'str'], "output": "row",
+APIs["filter_str_not_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "row",
                              "function": lambda t, col, value: fuzzy_match_filter(t, col, value, negate=True),
                              "tostr": lambda t, col, value: "filter_not_eq {{ {} ; {} ; {} }}".format(t, col, value),
                              'append': False}
@@ -172,19 +182,19 @@ APIs["filter_less_eq"] = {"argument": ['row', 'header', 'obj'], "output": "row",
                           "tostr": lambda t, col, value: "filter_less_eq {{ {} ; {} ; {} }}".format(t, col, value),
                           "append": False}
 
-APIs["filter_all"] = {"argument": ['row', 'header'], "output": "row",
-                      "function": lambda t, col: t,
-                      "tostr": lambda t, col: "filter_all {{ {} ; {} }}".format(t, col),
-                      'append': False}
+# APIs["filter_all"] = {"argument": ['row', 'header'], "output": "row",
+#                       "function": lambda t, col: t,
+#                       "tostr": lambda t, col: "filter_all {{ {} ; {} }}".format(t, col),
+#                       'append': False}
 
 # all
 # str
-APIs["all_str_eq"] = {"argument": ['row', 'header', 'str'], "output": "bool",
+APIs["all_str_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "bool",
                       "function": lambda t, col, value: len(t) == len(fuzzy_match_filter(t, col, value)),
                       "tostr": lambda t, col, value: "all_eq {{ {} ; {} ; {} }}".format(t, col, value),
                       "append": None}
 
-APIs["all_str_not_eq"] = {"argument": ['row', 'header', 'str'], "output": "bool",
+APIs["all_str_not_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "bool",
                           "function": lambda t, col, value: 0 == len(fuzzy_match_filter(t, col, value)),
                           "tostr": lambda t, col, value: "all_not_eq {{ {} ; {} ; {} }}".format(t, col, value),
                           "append": None}
@@ -225,12 +235,12 @@ APIs["all_greater_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool"
 
 # most
 # str
-APIs["most_str_eq"] = {"argument": ['row', 'header', 'str'], "output": "bool",
+APIs["most_str_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "bool",
                        "function": lambda t, col, value: len(t) // 3 <= len(fuzzy_match_filter(t, col, value)),
                        "tostr": lambda t, col, value: "most_eq {{ {} ; {} ; {} }}".format(t, col, value),
                        "append": None}
 
-APIs["most_str_not_eq"] = {"argument": ['row', 'header', 'str'], "output": "bool",
+APIs["most_str_not_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "bool",
                            "function": lambda t, col, value: len(t) // 3 > len(fuzzy_match_filter(t, col, value)),
                            "tostr": lambda t, col, value: "most_not_eq {{ {} ; {} ; {} }}".format(t, col, value),
                            "append": None}
@@ -296,14 +306,16 @@ pat_day = r"\b(\d\d?)\b"
 pat_month = r"\b((?:jan(?:uary)?|feb(?:ruary)?|mar(?:rch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?))\b"
 
 
-class ExeError(object):
+class ExeError(ValueError):
     def __init__(self, message="exe error"):
+        super(ExeError, self).__init__()
         self.message = message
 
 
 ### for filter functions. we reset index for the result
 
 # filter_str_eq / not_eq
+# Type: col - str_col, val - str
 def fuzzy_match_filter(t, col, val, negate=False):
     trim_t = t[col].str.replace(" ", "")
     trim_val = val.replace(" ", "")
@@ -317,6 +329,7 @@ def fuzzy_match_filter(t, col, val, negate=False):
 
 
 # filter nums ...
+# Type: col - obj_col, val - obj
 def fuzzy_compare_filter(t, col, val, type):
     '''
     fuzzy compare and filter out rows.
@@ -326,6 +339,7 @@ def fuzzy_compare_filter(t, col, val, type):
     '''
 
     t[col] = t[col].astype('str')
+    val = str(val)
 
     # dates
     if len(re.findall(pat_month, val)) > 0:
@@ -389,12 +403,15 @@ def fuzzy_compare_filter(t, col, val, type):
     if len(val_pat) == 0:
         # return pd.DataFrame(columns=list(t.columns))
         # fall back to full string matching
+        trim_t = t[col].str.replace(" ", "")
+        trim_val = val.replace(" ", "")
+
         if type == "eq":
-            return t[t[col].str.contains(val, regex=False)]
+            return t[trim_t.str.contains(trim_val, regex=False)].reset_index(drop=True)
         elif type == "not_eq":
-            return t[~t[col].str.contains(val, regex=False)]
+            return t[~trim_t.str.contains(trim_val, regex=False)].reset_index(drop=True)
         else:
-            return pd.DataFrame(columns=list(t.columns))
+            return pd.DataFrame(columns=list(t.columns)).reset_index(drop=True)
 
         # return pd.DataFrame(columns=list(t.columns))
 
@@ -439,11 +456,9 @@ def fuzzy_compare_filter(t, col, val, type):
     res = res.reset_index(drop=True)
     return res
 
-    # all invalid
-    return pd.DataFrame(columns=list(t.columns))
-
 
 ### for comparison
+# Type: obj
 def obj_compare(num1, num2, round=False, type="eq"):
     tolerance = 0.15 if round else 1e-9
     # both numeric
@@ -465,10 +480,6 @@ def obj_compare(num1, num2, round=False, type="eq"):
             return num_1 < num_2
         elif type == "diff":
             return num_1 - num_2
-
-
-
-
     except ValueError:
         # strings
         # mixed numbers and strings
@@ -499,7 +510,7 @@ def obj_compare(num1, num2, round=False, type="eq"):
             try:
                 date_val1 = pd.datetime(year_val1, month_val1, day_val1)
             except:
-                return ExeError
+                raise ExeError()
 
             # num2
             year_val2 = re.findall(pat_year, num2)
@@ -523,7 +534,7 @@ def obj_compare(num1, num2, round=False, type="eq"):
             try:
                 date_val2 = pd.datetime(year_val2, month_val2, day_val2)
             except:
-                return ExeError
+                raise ExeError()
 
             # if negate:
             #   return date_val1 != date_val2
@@ -546,14 +557,13 @@ def obj_compare(num1, num2, round=False, type="eq"):
         val_pat1 = re.findall(pat_num, num1)
         val_pat2 = re.findall(pat_num, num2)
         if len(val_pat1) == 0 or len(val_pat2) == 0:
-
             # fall back to full string matching
             if type == "not_eq":
                 return (num1 not in num2) and (num2 not in num1)
             elif type == "eq":
                 return num1 in num2 or num2 in num1
             else:
-                return ExeError()
+                raise ExeError()
 
         num_1 = val_pat1[0].replace(",", "")
         num_1 = num_1.replace(":", "")
@@ -587,10 +597,12 @@ def obj_compare(num1, num2, round=False, type="eq"):
             return num_1 < num_2
         elif type == "diff":
             return num_1 - num_2
+        else:
+            raise ValueError(f"Unsupported type: {type}")
 
 
 ### for aggregation: sum avg
-
+# Type: num
 def agg(t, col, type):
     '''
     sum or avg for aggregation
@@ -602,7 +614,8 @@ def agg(t, col, type):
             res = t[col].sum()
         elif type == "avg":
             res = t[col].mean()
-
+        else:
+            raise ValueError(f"Unsupported Type: {type}")
         return res
 
     else:
@@ -627,19 +640,21 @@ def agg(t, col, type):
             return nums.sum()
         elif type == "mean":
             return nums.mean()
+        else:
+            raise ValueError(f"Unsupported Type: {type}")
 
 
 ### for hop
 
 def hop_op(t, col):
     if len(t) == 0:
-        return ExeError()
+        raise ExeError()
 
     return t[col].values[0]
 
 
 ### for superlative, ordinal
-
+# Type: col - obj
 def nth_maxmin(t, col, order=1, max_or_min="max", arg=False):
     '''
     for max, min, argmax, argmin,
@@ -647,6 +662,7 @@ def nth_maxmin(t, col, order=1, max_or_min="max", arg=False):
 
     return string or rows
     '''
+    t[col] = t[col].astype('str')
 
     order = int(order)
     ### return the original content for max,min
@@ -691,7 +707,7 @@ def nth_maxmin(t, col, order=1, max_or_min="max", arg=False):
     if pats.isnull().all():
         pats = t[col].str.extract(pat_num, expand=False)
     if pats.isnull().all():
-        return ExeError()
+        raise ExeError()
     nums = pats.str.replace(",", "")
     nums = nums.str.replace(":", "")
     nums = nums.str.replace(" ", "")
@@ -713,13 +729,7 @@ def nth_maxmin(t, col, order=1, max_or_min="max", arg=False):
             res = t.iloc[ind]
         else:
             res = t.iloc[ind][col].values[0]
-
     except:
-        return ExeError()
+        raise ExeError()
 
-    # print (res)
     return res
-
-
-def is_ascii(s):
-    return all(ord(c) < 128 for c in s)

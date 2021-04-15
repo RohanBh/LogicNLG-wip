@@ -290,7 +290,7 @@ class Node(object):
         new_trace_num = []
         for k in range(len(self.memory_num)):
             if k in args:
-                if 'msk_' in self.memory_num[k]:
+                if 'msk_' in self.memory_num[k][0]:
                     raise ValueError("Removing masked entity")
                 continue
             else:
