@@ -1534,7 +1534,7 @@ class Parser(object):
                     to_delete = []
 
         for k, v in mem_num:
-            if k not in head_num and k != "tmp_input":
+            if k not in head_num and k not in ["tmp_input", 'ntharg']:
                 head_num.append(k)
 
         for k, v in mem_str:
@@ -1704,6 +1704,10 @@ def test_1():
     def parse_it(tbl, sent, alt_sent=None):
         if alt_sent is None:
             alt_sent = sent
+
+        print("Title:", parser.title_mapping[tbl])
+        print("Table:", tbl)
+
         return parser.parse(tbl, alt_sent, get_logic_json(tbl, sent), True)
 
     # parse_it("2-14173105-18.html.csv",
@@ -1717,11 +1721,17 @@ def test_1():
     #                "the match on 16 march 2008 had the highest attendance of all the matches ."))
 
     # No programs
-    print(parse_it("1-2417445-4.html.csv",
-                   "in the 54th united states congress , of the successors that took office in 1895 ,"
-                   " the only time that the vacancy was due to a resignation was when the vacator was "
-                   "edwin j jordan ."))
-
+    ## reason: Entity linker is not able to link the word "resignation" to the entity "resigned march 4 , 1894"
+    # print(parse_it("1-2417445-4.html.csv",
+    #                "in the 54th united states congress , of the successors that took office in 1895 ,"
+    #                " the only time that the vacancy was due to a resignation was when the vacator was "
+    #                "edwin j jordan ."))
+    ## reaason: Avg position is 95 and round=True in comparison is not able to make 100 equal to 95
+    # print(parse_it("2-1027162-1.html.csv",
+    #                "the lauryn williams competitions have an aggregate position of about 100 m."))
+    ## reason: No trigger words for sum present here
+    print(parse_it("1-27922491-8.html.csv",
+                   "the members of the somerset county cricket club in 2009 played in 84 matches ."))
     return
 
 
@@ -1743,6 +1753,7 @@ def test_2():
         check = parser.parse(table, sent, logic_json, True)
 
     print("Table:", table)
+    print("Title:", parser.title_mapping[table])
     print("Sent:", sent)
     print(check)
     return
@@ -1771,5 +1782,5 @@ def generate_programs():
 
 
 if __name__ == "__main__":
-    test_1()
+    test_2()
     # generate_programs()

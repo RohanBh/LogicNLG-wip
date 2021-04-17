@@ -638,7 +638,7 @@ def agg(t, col, type):
         # print (nums)
         if type == "sum":
             return nums.sum()
-        elif type == "mean":
+        elif type == "avg":
             return nums.mean()
         else:
             raise ValueError(f"Unsupported Type: {type}")
