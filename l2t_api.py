@@ -1,8 +1,32 @@
 import math
 import re
+from collections import Counter
 
 import numpy as np
 import pandas as pd
+
+type2funcs = {'aggregation': {'avg', 'sum'},
+              'comparative': {'diff', 'greater', 'less'},
+              'count': {'count'},
+              'majority': {'all_eq',
+                           'all_greater',
+                           'all_greater_eq',
+                           'all_less',
+                           'all_less_eq',
+                           'all_not_eq',
+                           'all_str_eq',
+                           'most_eq',
+                           'most_greater',
+                           'most_greater_eq',
+                           'most_less',
+                           'most_less_eq',
+                           'most_not_eq',
+                           'most_str_eq',
+                           'most_str_not_eq'},
+              'ordinal': {'nth_argmax', 'nth_min', 'nth_argmin', 'nth_max'},
+              'superlative': {'argmax', 'max', 'argmin', 'min'},
+              'unique': {'only'}
+              }
 
 APIs = {}
 
@@ -98,6 +122,7 @@ APIs['diff'] = {"argument": ['obj', 'obj'], 'output': 'obj',
                 'tostr': lambda t1, t2: "diff {{ {} ; {} }}".format(t1, t2),
                 'append': True}
 
+# Greater takes two objects of same type (hop on filter_str_eq) and outputs a bool.
 APIs['greater'] = {"argument": ['obj', 'obj'], 'output': 'bool',
                    'function': lambda t1, t2: obj_compare(t1, t2, type="greater"),
                    'tostr': lambda t1, t2: "greater {{ {} ; {} }}".format(t1, t2),
@@ -281,6 +306,116 @@ APIs["most_greater_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool
                            "tostr": lambda t, col, value: "most_greater_eq {{ {} ; {} ; {} }}".format(t, col, value),
                            "append": None}
 
+## Inverse functions here
+
+# Write the greater_str_inv and greater_inv funcs. Takes ['row', 'header_str', 'str', 'header'] and
+# ['row', 'header', 'obj', 'header'] respectively as input and returns the header1's values for rows
+# whose header2's value is smaller than: hop(filter_eq(header1, $1), header2)
+# APIs['greater_inv'] = {"argument": ['row', 'header', 'obj', 'header'], 'output': 'list_obj',
+#                        'function': lambda t, col1, val, col2: gl_inv(t, col1, val, col2, "greater"),
+#                        'tostr': lambda t, col1, val, col2: "greater_inv {{ {} ; {} ; {} ; {} }}".format(
+#                            t, col1, val, col2),
+#                        'append': None}
+
+APIs['greater_str_inv'] = {"argument": ['row', 'header_str', 'str', 'header'], 'output': 'list_str',
+                           'function': lambda t, col1, val, col2: gl_inv_str(t, col1, val, col2, "greater"),
+                           'tostr': lambda t, col1, val, col2: "greater_inv {{ {} ; {} ; {} ; {} }}".format(
+                               t, col1, val, col2),
+                           'append': None}
+
+# APIs['less_inv'] = {"argument": ['row', 'header', 'obj', 'header'], 'output': 'list_obj',
+#                     'function': lambda t, col1, val, col2: gl_inv(t, col1, val, col2, "less"),
+#                     'tostr': lambda t, col1, val, col2: "less_inv {{ {} ; {} ; {} ; {} }}".format(
+#                         t, col1, val, col2),
+#                     'append': None}
+
+APIs['less_str_inv'] = {"argument": ['row', 'header_str', 'str', 'header'], 'output': 'list_str',
+                        'function': lambda t, col1, val, col2: gl_inv_str(t, col1, val, col2, "less"),
+                        'tostr': lambda t, col1, val, col2: "less_inv {{ {} ; {} ; {} ; {} }}".format(
+                            t, col1, val, col2),
+                        'append': None}
+
+# Write the most_str_eq_inv func. Takes 'row', 'header' as input and outputs the values which occurs majority
+# of the times (>= len(t) // 3). This is not exactly right because the value may also be a substr for majority of
+# the columns. But, detecting which set of columns have that substr can be tough. Naive solution requires
+# O(nC(t//3) + nC(t//3+1) + ...)
+# Precondition: The majority value occurs at least len(t) // 3 times in the header.
+APIs["most_str_eq_inv"] = {"argument": ['row', 'header_str'], "output": "list_str",
+                           "function": lambda t, col: str_eq_inv(t, col, "most"),
+                           "tostr": lambda t, col: "most_eq_inv {{ {} ; {} }}".format(t, col),
+                           "append": None}
+
+# Write the all_str_eq_inv func. Takes 'row', 'header' as input and does the following:
+# 1. Trim whitespaces 2. Find and return the largest common substr
+# Precondition: Such a substr should exist
+APIs["all_str_eq_inv"] = {"argument": ['row', 'header_str'], "output": "str",
+                          "function": lambda t, col: str_eq_inv(t, col, "all"),
+                          "tostr": lambda t, col: "all_eq_inv {{ {} ; {} }}".format(t, col),
+                          "append": None}
+
+# Write the most_greater_inv func. Takes 'row', 'header' as input, creates a df of datetime and numbers using
+# regex pats and returns the largest element x such that len(df[df > x]) >= len(t) // 3. This return value signifies a
+# range of values from (-inf, x].
+APIs["most_greater_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
+                            "function": lambda t, col: fuzzy_comp_inv(t, col, "mgt"),
+                            "tostr": lambda t, col: "most_greater_inv {{ {} ; {} }}".format(t, col),
+                            "append": None}
+
+APIs["most_greater_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
+                               "function": lambda t, col: fuzzy_comp_inv(t, col, "mgte"),
+                               "tostr": lambda t, col: "most_greater_eq_inv {{ {} ; {} }}".format(t, col),
+                               "append": None}
+
+# Write the most_less_inv func. Takes 'row', 'header' as input, creates a df of datetime and numbers using
+# regex pats and returns the smallest element x such that len(df[df < x]) >= len(t) // 3. This return value signifies a
+# range of values from [x, inf).
+APIs["most_less_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
+                         "function": lambda t, col: fuzzy_comp_inv(t, col, "mlt"),
+                         "tostr": lambda t, col: "most_less_inv {{ {} ; {} }}".format(t, col),
+                         "append": None}
+
+APIs["most_less_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
+                            "function": lambda t, col: fuzzy_comp_inv(t, col, "mlte"),
+                            "tostr": lambda t, col: "most_less_eq_inv {{ {} ; {} }}".format(t, col),
+                            "append": None}
+
+APIs["all_greater_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
+                           "function": lambda t, col: fuzzy_comp_inv(t, col, "agt"),
+                           "tostr": lambda t, col: "all_greater_inv {{ {} ; {} }}".format(t, col),
+                           "append": None}
+
+APIs["all_greater_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
+                              "function": lambda t, col: fuzzy_comp_inv(t, col, "agte"),
+                              "tostr": lambda t, col: "all_greater_eq_inv {{ {} ; {} }}".format(t, col),
+                              "append": None}
+
+APIs["all_less_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
+                        "function": lambda t, col: fuzzy_comp_inv(t, col, "alt"),
+                        "tostr": lambda t, col: "all_less_inv {{ {} ; {} }}".format(t, col),
+                        "append": None}
+
+APIs["all_less_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
+                           "function": lambda t, col: fuzzy_comp_inv(t, col, "alte"),
+                           "tostr": lambda t, col: "all_less_eq_inv {{ {} ; {} }}".format(t, col),
+                           "append": None}
+
+# Write the most_eq_inv func. most_eq_inv takes as input a 'row', 'header' and creates a date df and a num df from
+# regex pats. From there, it creates a counter of values and returns all the keys as output that have counts/values
+# greater than eq to len(t) // 3
+# returns pair of list of obj
+APIs["most_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_list_obj",
+                       "function": lambda t, col: fuzzy_comp_inv(t, col, "meq"),
+                       "tostr": lambda t, col: "most_eq_inv {{ {} ; {} }}".format(t, col),
+                       "append": None}
+
+# Write the all_eq_inv func. Takes 'row', 'header' as input and outputs the eq value(s)
+# on datetime df and the num df.
+# Precondition: All col values are equal.
+APIs["all_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
+                      "function": lambda t, col: fuzzy_comp_inv(t, col, "aeq"),
+                      "tostr": lambda t, col: "all_eq_inv {{ {} ; {} }}".format(t, col),
+                      "append": None}
+
 month_map = {'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
              'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12,
              'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6, 'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10,
@@ -306,8 +441,8 @@ pat_day = r"\b(\d\d?)\b"
 pat_month = r"\b((?:jan(?:uary)?|feb(?:ruary)?|mar(?:rch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?))\b"
 
 
-class ExeError(ValueError):
-    def __init__(self, message="exe error"):
+class ExeError(Exception):
+    def __init__(self, message):
         super(ExeError, self).__init__()
         self.message = message
 
@@ -452,9 +587,82 @@ def fuzzy_compare_filter(t, col, val, type):
         res = t[np.isclose(nums, num)]
     elif type == "not_eq":
         res = t[~np.isclose(nums, num)]
+    else:
+        raise ValueError(f"Unsupported Type: {type}")
 
     res = res.reset_index(drop=True)
     return res
+
+
+# For compare inverses
+# Type: col - obj_col
+def fuzzy_comp_inv(t, col, type):
+    """
+    Fuzzy compare for objects
+
+    type: mgt, mlt, mgte, mlte, agt, alt, agte, alte, meq, aeq
+    """
+    t[col] = t[col].astype('str')
+
+    # dates
+    year_list = t[col].str.extract(pat_year, expand=False)
+    day_list = t[col].str.extract(pat_day, expand=False)
+    month_list = t[col].str.extract(pat_month, expand=False)
+    month_num_list = month_list.map(month_map)
+
+    # pandas at most 2262
+    year_list = year_list.fillna("2260").astype("int")
+    day_list = day_list.fillna("1").astype("int")
+    month_num_list = month_num_list.fillna("1").astype("int")
+
+    date_frame = pd.to_datetime(pd.DataFrame({'year': year_list, 'month': month_num_list, 'day': day_list}))
+    date_values = sorted(date_frame)
+
+    pats = t[col].str.extract(pat_add, expand=False)
+    if pats.isnull().all():
+        pats = t[col].str.extract(pat_num, expand=False)
+
+    nums = pats.str.replace(",", "")
+    nums = nums.str.replace(":", "")
+    nums = nums.str.replace(" ", "")
+    try:
+        nums = nums.astype("float")
+    except:
+        nums = nums.str.replace(".", "")
+        nums = nums.astype("float")
+    nums = sorted(nums)
+
+    if 'gt' in type:
+        idx = 0 if type[0] == 'a' else len(t) - len(t) // 3
+        if 'gte' in type:
+            return nums[idx], date_values[idx]
+        else:
+            return nums[idx] - 0.0001, date_values[idx] - pd.Timedelta(days=1)
+    if 'lt' in type:
+        idx = len(t) - 1 if type[0] == 'a' else len(t) // 3 - 1
+        if 'lte' in type:
+            return nums[idx], date_values[idx]
+        else:
+            return nums[idx] + 0.0001, date_values[idx] + pd.Timedelta(days=1)
+    if 'eq' in type:
+        c_num, c_dt = Counter(nums), Counter(date_values)
+        if type == 'aeq':
+            if not (len(c_num) == 1 or len(c_dt) == 1):
+                raise ExeError(f"Unable to apply obj aeq func on col {col}")
+            return (list(c_num.keys())[0] if len(c_num) == 1 else None,
+                    list(c_dt.keys())[0] if len(c_dt) == 1 else None)
+        if type == 'meq':
+            num_opt, dt_opt = [], []
+            for k, v in c_num:
+                if v >= len(t) // 3:
+                    num_opt.append(k)
+            for k, v in c_dt:
+                if v >= len(t) // 3:
+                    dt_opt.append(k)
+            if not (len(num_opt) > 0 or len(dt_opt) > 0):
+                raise ExeError(f"Unable to apply obj meq func on col {col}")
+            return num_opt if len(num_opt) > 0 else None, dt_opt if len(dt_opt) > 0 else None
+    raise ValueError(f"Unsupported type: {type}")
 
 
 ### for comparison
@@ -510,7 +718,7 @@ def obj_compare(num1, num2, round=False, type="eq"):
             try:
                 date_val1 = pd.datetime(year_val1, month_val1, day_val1)
             except:
-                raise ExeError()
+                raise ValueError(f"Unable to convert val to datetime: {num1}")
 
             # num2
             year_val2 = re.findall(pat_year, num2)
@@ -534,7 +742,7 @@ def obj_compare(num1, num2, round=False, type="eq"):
             try:
                 date_val2 = pd.datetime(year_val2, month_val2, day_val2)
             except:
-                raise ExeError()
+                raise ValueError(f"Unable to convert val to datetime: {num2}")
 
             # if negate:
             #   return date_val1 != date_val2
@@ -563,7 +771,7 @@ def obj_compare(num1, num2, round=False, type="eq"):
             elif type == "eq":
                 return num1 in num2 or num2 in num1
             else:
-                raise ExeError()
+                raise ValueError(f"Unsupported type: {type}")
 
         num_1 = val_pat1[0].replace(",", "")
         num_1 = num_1.replace(":", "")
@@ -648,7 +856,7 @@ def agg(t, col, type):
 
 def hop_op(t, col):
     if len(t) == 0:
-        raise ExeError()
+        raise ValueError("Hop received 0 len df")
 
     return t[col].values[0]
 
@@ -707,7 +915,7 @@ def nth_maxmin(t, col, order=1, max_or_min="max", arg=False):
     if pats.isnull().all():
         pats = t[col].str.extract(pat_num, expand=False)
     if pats.isnull().all():
-        raise ExeError()
+        raise ValueError(f"df col {col} not a obj type")
     nums = pats.str.replace(",", "")
     nums = nums.str.replace(":", "")
     nums = nums.str.replace(" ", "")
@@ -729,7 +937,61 @@ def nth_maxmin(t, col, order=1, max_or_min="max", arg=False):
             res = t.iloc[ind]
         else:
             res = t.iloc[ind][col].values[0]
-    except:
-        raise ExeError()
+    except Exception as e:
+        raise e
 
     return res
+
+
+def str_eq_inv(t, col, type):
+    """
+    type: all, most
+    """
+    ctr = Counter(t[col])
+    if type == 'all':
+        if len(ctr) != 1:
+            raise ExeError(f"Can't apply str aeq on col {col}")
+        return list(ctr.keys())[0]
+    if type == 'most':
+        vals = []
+        for k, v in ctr:
+            if v >= len(t) // 3:
+                vals.append(k)
+        if len(vals) == 0:
+            raise ExeError(f"Can't apply str meq on col {col}")
+        return vals
+    raise ValueError(f"Unsupported Type: {type}")
+
+
+def gl_inv(t, col1, val, col2, type):
+    """
+    type: greater, less
+    """
+    df = fuzzy_compare_filter(t, col1, val, type="eq")
+    if len(df) != 1:
+        raise ExeError(f"Can't apply obj-{type}-inv for the filter col {col1} and val {val}")
+    tmp1 = hop_op(df, col2)
+    ret_vals = []
+    for tmp2, hop_val in zip(t[col2], t[col1]):
+        if obj_compare(tmp1, tmp2, type=type):
+            ret_vals.append(hop_op(t, hop_val))
+    if len(ret_vals) == 0:
+        raise ExeError(f"No rows found {type} than {tmp1} in col {col2}")
+    return ret_vals
+
+
+def gl_inv_str(t, col1, val, col2, type):
+    """
+    type: greater, less
+    """
+    df = fuzzy_match_filter(t, col1, val)
+    if len(df) != 1:
+        raise ExeError(f"Can't apply obj-{type}-inv for the filter col {col1} and val {val}")
+    tmp1 = hop_op(df, col2)
+    ret_vals = []
+    for tmp2, hop_val in zip(t[col2], t[col1]):
+        if obj_compare(tmp1, tmp2, type=type):
+            ret_vals.append(hop_op(t, hop_val))
+    if len(ret_vals) == 0:
+        raise ExeError(f"No rows found {type} than {tmp1} in col {col2}")
+    return ret_vals
