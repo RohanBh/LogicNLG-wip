@@ -449,14 +449,8 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                 if not root.exist(command):
                                     tmp = root.clone(command, k)
                                     returned = call(command, v['function'], va)
-                                    # if tmp.done():
-                                    #     tmp.append_result(
-                                    #         command,
-                                    #         f'{returned}/' + str(f'{root.get_msk_val():.3f}' == f'{returned:.3f}'))
-                                    #     finished.append((tmp, returned))
-                                    # else:
-                                    #     tmp.add_memory_num(h, returned, returned)
-                                    #     conditional_add(tmp, hist[step + 1])
+                                    if isinstance(returned, FailedCommand):
+                                        continue
                                     if tmp.done():
                                         continue
                                     else:
@@ -493,6 +487,8 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                             tmp = root.clone(command, k)
                             tmp.inc_row_counter(j)
                             returned = call(command, v['function'], row)
+                            if isinstance(returned, FailedCommand):
+                                continue
                             if v['output'] == 'num':
                                 if tmp.done():
                                     tmp.append_result(
@@ -522,6 +518,8 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                     tmp = root.clone(command, k)
                                     tmp.inc_row_counter(j)
                                     returned = call(command, v['function'], row, root.all_headers[l])
+                                    if isinstance(returned, FailedCommand):
+                                        continue
                                     if tmp.done():
                                         tmp.append_result(
                                             command,
@@ -620,6 +618,8 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                 tmp.inc_row_counter(j)
 
                                 returned = call(command, v['function'], row, root.header_num[l])
+                                if isinstance(returned, FailedCommand):
+                                    continue
                                 if v['output'] == 'num':
                                     if tmp.done():
                                         tmp.append_result(
@@ -693,6 +693,8 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                             tmp.delete_memory(*root.mem_objects[m])
                                             returned = call(command, v['function'],
                                                             root.mem_objects[l][1], root.mem_objects[l][1])
+                                            if isinstance(returned, FailedCommand):
+                                                continue
                                             if tmp.done():
                                                 tmp.append_result(
                                                     command,
@@ -719,6 +721,8 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                     tmp.inc_row_counter(j)
                                     tmp.delete_memory_str(tmp.memory_str.index((h, va)))
                                     returned = call(command, v['function'], row, h, va)
+                                    if isinstance(returned, FailedCommand):
+                                        continue
                                     if v['output'] == 'row':
                                         if len(returned) > 0:
                                             tmp.add_rows(command, returned)
@@ -743,6 +747,8 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                     tmp.delete_memory(h, va)
 
                                     returned = call(command, v['function'], row, h, va)
+                                    if isinstance(returned, FailedCommand):
+                                        continue
                                     if v['output'] == 'row':
                                         if len(returned) > 0:
                                             tmp.add_rows(command, returned)
@@ -768,6 +774,8 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                     tmp.inc_row_counter(j)
 
                                     returned = call(command, v['function'], row, root.obj_headers[l], va)
+                                    if isinstance(returned, FailedCommand):
+                                        continue
                                     if v['output'] == 'obj':
                                         if tmp.done():
                                             tmp.append_result(
@@ -2010,5 +2018,5 @@ def generate_programs():
 
 
 if __name__ == "__main__":
-    test_3(26)
+    test_3(34)
     # generate_programs()

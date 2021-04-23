@@ -589,7 +589,7 @@ def fuzzy_compare_filter(t, col, val, type):
     elif type == "not_eq":
         res = t[~np.isclose(nums, num)]
     else:
-        raise ValueError(f"Unsupported Type: {type}")
+        (f"Unsupported Type: {type}")
 
     res = res.reset_index(drop=True)
     return res
@@ -733,7 +733,7 @@ def obj_compare(num1, num2, round=False, type="eq"):
                 try:
                     date_val1 = pd.datetime(year_val1, month_val1, day_val1)
                 except:
-                    raise ValueError(f"Unable to convert val to datetime: {num1}")
+                    raise ExeError(f"Unable to convert val to datetime: {num1}")
 
                 # num2
                 year_val2 = re.findall(pat_year, num2)
@@ -757,7 +757,7 @@ def obj_compare(num1, num2, round=False, type="eq"):
                 try:
                     date_val2 = pd.datetime(year_val2, month_val2, day_val2)
                 except:
-                    raise ValueError(f"Unable to convert val to datetime: {num2}")
+                    raise ExeError(f"Unable to convert val to datetime: {num2}")
 
                 # if negate:
                 #   return date_val1 != date_val2
@@ -942,7 +942,7 @@ def nth_maxmin(t, col, order=1, max_or_min="max", arg=False):
     if pats.isnull().all():
         pats = t[col].str.extract(pat_num, expand=False)
     if pats.isnull().all():
-        raise ValueError(f"df col {col} not a obj type")
+        raise ExeError(f"df col {col} not a obj type")
     nums = pats.str.replace(",", "")
     nums = nums.str.replace(":", "")
     nums = nums.str.replace(" ", "")
