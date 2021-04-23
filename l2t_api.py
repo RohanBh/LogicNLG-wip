@@ -1017,8 +1017,11 @@ def gl_inv_str(t, col1, val, col2, type):
     tmp1 = hop_op(df, col2)
     ret_vals = []
     for tmp2, hop_val in zip(t[col2], t[col1]):
-        if obj_compare(tmp1, tmp2, type=type):
-            ret_vals.append(hop_val)
+        try:
+            if obj_compare(tmp1, tmp2, type=type):
+                ret_vals.append(hop_val)
+        except:
+            pass
     if len(ret_vals) == 0:
         raise ExeError(f"No rows found {type} than {tmp1} in col {col2}")
     return ret_vals

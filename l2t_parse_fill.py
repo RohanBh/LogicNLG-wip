@@ -172,6 +172,8 @@ class Node(object):
             return 'date'
         if header == 'tmp_count':
             return 'num'
+        if 'tmp_' in header:
+            return self.get_memory_type(header.replace('tmp_', ''))
         raise ValueError(f"Unseen header: {header}")
 
     def add_memory_num(self, header, val, command):
@@ -194,15 +196,15 @@ class Node(object):
         if isinstance(val, str):
             self.memory_str.append((header, val))
             self.trace_str.append(command)
-        else:
-            raise ValueError("type error: {}".format(type(val)))
+        # else:
+        #     raise ValueError("type error: {}".format(type(val)))
 
     def add_memory_date(self, header, val, command):
         if isinstance(val, str) and len(re.findall(pat_month, val)) > 0:
             self.memory_date.append((header, val))
             self.trace_date.append(command)
-        else:
-            raise ValueError(f"type error: {type(val)}, value: {val}")
+        # else:
+        #     raise ValueError(f"type error: {type(val)}, value: {val}")
 
     def add_memory(self, header, val, command, aux_header=None):
         if aux_header is None:
@@ -2018,5 +2020,5 @@ def generate_programs():
 
 
 if __name__ == "__main__":
-    test_3(34)
+    test_3(264)
     # generate_programs()
