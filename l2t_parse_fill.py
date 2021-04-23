@@ -15,7 +15,7 @@ from tqdm.auto import tqdm
 from unidecode import unidecode
 
 from APIs import non_triggers, fuzzy_match
-from l2t_api import obj_compare, APIs, pat_add, pat_num, pat_month
+from l2t_api import obj_compare, APIs, pat_add, pat_num, pat_month, ExeError
 
 with open('data/freq_list.json') as f:
     vocab = json.load(f)
@@ -60,8 +60,9 @@ class Node(object):
         # if self.memory_str_len == 0 and self.memory_num_len == 0 and \
         #         all([_ > 0 for _ in self.row_counter]):
         finished_num = all(['tmp_input' == x[0] or 'tmp' not in x[0] for x in self.memory_num])
+        finished_date = all(['tmp_input' == x[0] or 'tmp' not in x[0] for x in self.memory_date])
         finished_str = all(['tmp_input' == x[0] or 'tmp' not in x[0] for x in self.memory_str])
-        if finished_num and finished_str and all([_ > 0 for _ in self.row_counter]):
+        if finished_num and finished_str and finished_date and all([_ > 0 for _ in self.row_counter]):
             for funcs in self.must_have:
                 if any([f in self.cur_funcs for f in funcs]):
                     continue
@@ -113,7 +114,7 @@ class Node(object):
 
     @property
     def tmp_memory_num_len(self):
-        return len([_ for _ in self.memory_num if "tmp_" in _ and _ != "tmp_none"])
+        return len([_ for _ in self.memory_num if "tmp_" in _ and _ not in ["tmp_none", 'tmp_input']])
         # return len(self.memory_num)
 
     @property
@@ -129,8 +130,12 @@ class Node(object):
         return hash(frozenset(self.cur_strs))
 
     @property
-    def headers(self):
+    def all_headers(self):
         return self.header_num + self.header_str + self.header_date
+
+    @property
+    def obj_headers(self):
+        return self.header_num + self.header_date
 
     @property
     def memories(self):
@@ -141,7 +146,7 @@ class Node(object):
         return self.memory_num + self.memory_date
 
     @property
-    def traces(self):
+    def all_traces(self):
         return self.trace_num + self.trace_str + self.trace_date
 
     @property
@@ -150,18 +155,6 @@ class Node(object):
 
     def append_result(self, command, r):
         self.cur_str = "{}={}".format(command, r)
-
-    def get_memory_str(self, i):
-        i -= self.memory_num_len
-        return self.memory_str[i][1]
-
-    def get_memory_num(self, i):
-        return self.memory_num[i][1]
-
-    def is_mem_num(self, i):
-        if i < self.memory_num_len:
-            return True
-        return False
 
     def get_memory_type(self, header):
         # if i < self.memory_num_len:
@@ -338,6 +331,11 @@ class Node(object):
         return True
 
 
+class FailedCommand:
+    def __init__(self, message):
+        self.message = message
+
+
 def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_date, head_str,
                         head_num, head_date, masked_val, num=6, debug=False):
     must_have = []
@@ -399,7 +397,10 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
 
     def call(command, f, *args):
         if command not in cache:
-            cache[command] = f(*args)
+            try:
+                cache[command] = f(*args)
+            except ExeError as err:
+                cache[command] = FailedCommand(err.message)
             return cache[command]
         else:
             return cache[command]
@@ -441,7 +442,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                     for i, (h, va) in enumerate(root.memories):
                         if v['output'] == 'any':
                             if step == 0 and "tmp" in h:
-                                command = v['tostr'](root.traces[i])
+                                command = v['tostr'](root.all_traces[i])
                                 if not root.exist(command):
                                     tmp = root.clone(command, k)
                                     returned = call(command, v['function'], va)
@@ -460,7 +461,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                         conditional_add(tmp, hist[step + 1])
                         elif v['output'] == 'none':
                             if step == 0 and "tmp" in h:
-                                command = v['tostr'](root.traces[i])
+                                command = v['tostr'](root.all_traces[i])
                                 if not root.exist(command):
                                     tmp = root.clone(command, k)
                                     tmp.delete_memory(h, va)
@@ -502,41 +503,45 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                 raise ValueError("error, out of scope")
 
                 # hop, max, min, argmax, argmin,
+                # [most/all]_[greater/less]_[eq]_inv, [most/all]_eq_inv
                 elif v['argument'] == ['row', 'header']:
                     if "hop" in k:
+                        # hop is special. It hops on all types of headers
+                        # TODO: Refactor this. Change the signature of hop to 'row, 'header_any'
                         for j, (row_h, row) in enumerate(root.rows):
                             if len(row) != 1:
                                 continue
-                            for l in range(len(root.headers)):
-                                command = v['tostr'](row_h, root.headers[l])
-                                if "; " + root.headers[l] + ";" in row_h:
+                            for l in range(len(root.all_headers)):
+                                command = v['tostr'](row_h, root.all_headers[l])
+                                if "; " + root.all_headers[l] + ";" in row_h:
                                     continue
                                 if not root.exist(command):
                                     tmp = root.clone(command, k)
                                     tmp.inc_row_counter(j)
-                                    returned = call(command, v['function'], row, root.headers[l])
+                                    returned = call(command, v['function'], row, root.all_headers[l])
                                     if tmp.done():
                                         tmp.append_result(
                                             command,
                                             f'{returned}/' + str(f'{obj_compare(masked_val[1], returned)}'))
                                         finished.append((tmp, returned))
                                     else:
-                                        tmp.add_memory("tmp_" + root.headers[l], returned, command, root.headers[l])
+                                        tmp.add_memory("tmp_" + root.all_headers[l], returned, command,
+                                                       root.all_headers[l])
                                         conditional_add(tmp, hist[step + 1])
                     else:
                         for j, (row_h, row) in enumerate(root.rows):
                             if len(row) == 1:
                                 continue
-                            for l in range(len(root.headers)):
-                                command = v['tostr'](row_h, root.headers[l])
+                            for l in range(len(root.obj_headers)):
+                                # TODO: Verify that header_num never contains tmp_input and ntharg
+                                command = v['tostr'](row_h, root.obj_headers[l])
                                 if not root.exist(command):
-                                    tmp = root.clone(command, k)
-                                    tmp.inc_row_counter(j)
-                                    # It does not make sense to do min/max over one line
-                                    if any([_ in k for _ in ['max', 'min', 'argmax', 'argmin']]) and len(row) == 1:
+                                    returned = call(command, v['function'], row, root.obj_headers[l])
+                                    if isinstance(returned, FailedCommand):
                                         continue
 
-                                    returned = call(command, v['function'], row, root.headers[l])
+                                    tmp = root.clone(command, k)
+                                    tmp.inc_row_counter(j)
                                     if v['output'] == 'obj':
                                         if tmp.done():
                                             tmp.append_result(
@@ -544,7 +549,8 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                                 f'{returned}/' + str(f'{obj_compare(masked_val[1], returned)}'))
                                             finished.append((tmp, returned))
                                         else:
-                                            tmp.add_memory("tmp_" + root.headers[l], returned, command, root.headers[l])
+                                            tmp.add_memory("tmp_" + root.obj_headers[l], returned, command,
+                                                           root.obj_headers[l])
                                             conditional_add(tmp, hist[step + 1])
                                     elif v['output'] == 'row':
                                         if len(returned) > 0:
@@ -552,6 +558,49 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                             conditional_add(tmp, hist[step + 1])
                                         else:
                                             continue
+                                    elif v['output'] == 'pair_obj':
+                                        if tmp.done():
+                                            if 'greater' in k:
+                                                comp_type = "less_eq"
+                                            elif 'less' in k:
+                                                comp_type = "greater_eq"
+                                            elif k == 'all_eq_inv':
+                                                comp_type = "eq"
+                                            else:
+                                                raise ValueError(f"error, output of scope {k}")
+                                            if len(re.findall(pat_month, masked_val[1])) > 0:
+                                                if returned[1] is None:
+                                                    continue
+                                                tmp.append_result(
+                                                    command,
+                                                    f'{returned[1]}/' +
+                                                    str(f'{obj_compare(masked_val[1], returned[1], comp_type)}'))
+                                                finished.append((tmp, returned[1]))
+                                            elif len(re.findall(pat_num, masked_val[1])) > 0:
+                                                if returned[0] is None:
+                                                    continue
+                                                tmp.append_result(
+                                                    command,
+                                                    f'{returned[0]}/' +
+                                                    str(f'{obj_compare(masked_val[1], returned[0], comp_type)}'))
+                                                finished.append((tmp, returned[0]))
+                                            else:
+                                                continue
+                                    elif v['output'] == 'pair_list_obj':
+                                        if tmp.done():
+                                            ix = None
+                                            if len(re.findall(pat_month, masked_val[1])) > 0:
+                                                ix = 1
+                                            elif len(re.findall(pat_num, masked_val[1])) > 0:
+                                                ix = 0
+                                            if ix is not None:
+                                                for ret_val in returned[ix]:
+                                                    tmp.append_result(
+                                                        command,
+                                                        f'{ret_val}/' + str(f'{obj_compare(masked_val[1], ret_val)}'))
+                                                    finished.append((tmp, ret_val))
+                                            else:
+                                                continue
                                     else:
                                         raise ValueError("error, output of scope")
 
@@ -576,6 +625,36 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                     else:
                                         tmp.add_memory_num("tmp_" + root.header_num[l], returned, command)
                                         conditional_add(tmp, hist[step + 1])
+                                else:
+                                    raise ValueError("error, output of scope")
+
+                # [most/all]_str_eq_inv
+                elif v['argument'] == ['row', 'header_str']:
+                    for j, (row_h, row) in enumerate(root.rows):
+                        if len(row) == 1:
+                            continue
+                        for l in range(len(root.header_str)):
+                            command = v['tostr'](row_h, root.header_str[l])
+                            if not root.exist(command):
+                                returned = call(command, v['function'], row, root.header_str[l])
+                                if isinstance(returned, FailedCommand):
+                                    continue
+                                tmp = root.clone(command, k)
+                                tmp.inc_row_counter(j)
+
+                                if v['output'] == 'str':
+                                    if tmp.done():
+                                        tmp.append_result(
+                                            command,
+                                            f'{returned}/' + str(f'{obj_compare(masked_val[1], returned)}'))
+                                        finished.append((tmp, returned))
+                                elif v['output'] == 'list_str':
+                                    if tmp.done():
+                                        for ret_val in returned:
+                                            tmp.append_result(
+                                                command,
+                                                f'{ret_val}/' + str(f'{obj_compare(masked_val[1], ret_val)}'))
+                                            finished.append((tmp, ret_val))
                                 else:
                                     raise ValueError("error, output of scope")
 
@@ -675,16 +754,16 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                         # It does not make sense to do max/argmax operation on one row
                         if len(row) == 1:
                             continue
-                        for l in range(len(root.headers)):
-                            for _h, va in root.mem_objects:
+                        for l in range(len(root.obj_headers)):
+                            for _h, va in root.memory_num:
                                 if _h != 'ntharg':
                                     continue
-                                command = v['tostr'](row_h, root.headers[l], va)
+                                command = v['tostr'](row_h, root.obj_headers[l], va)
                                 if not root.exist(command):
                                     tmp = root.clone(command, k)
                                     tmp.inc_row_counter(j)
 
-                                    returned = call(command, v['function'], row, root.headers[l], va)
+                                    returned = call(command, v['function'], row, root.obj_headers[l], va)
                                     if v['output'] == 'obj':
                                         if tmp.done():
                                             tmp.append_result(
@@ -692,7 +771,8 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                                 f'{returned}/' + str(f'{obj_compare(masked_val[1], returned)}'))
                                             finished.append((tmp, returned))
                                         else:
-                                            tmp.add_memory("tmp_" + root.headers[l], returned, command, root.headers[l])
+                                            tmp.add_memory("tmp_" + root.obj_headers[l], returned, command,
+                                                           root.obj_headers[l])
                                             conditional_add(tmp, hist[step + 1])
                                     elif v['output'] == 'row':
                                         if len(returned) > 0:
@@ -702,6 +782,35 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                             continue
                                     else:
                                         raise ValueError("error, output of scope")
+
+                # greater_str_inv, less_str_inv
+                elif v['argument'] == ['row', 'header_str', 'str', 'header']:
+                    for j, (row_h, row) in enumerate(root.rows):
+                        # It does not make sense to do greater_inv, less_inv operation on one row
+                        if len(row) == 1:
+                            continue
+                        for i, (h1, va1) in enumerate(root.memory_str):
+                            if "tmp_" in h1 or h1 == 'ntharg':
+                                continue
+                            for l in range(len(root.obj_headers)):
+                                command = v['tostr'](row_h, h1, root.trace_str[i], root.obj_headers[l])
+                                if not root.exist(command):
+                                    returned = call(command, v['function'], row, h1, va1, root.obj_headers[l])
+                                    if isinstance(returned, FailedCommand):
+                                        continue
+                                    tmp = root.clone(command, k)
+                                    tmp.inc_row_counter(j)
+                                    tmp.delete_memory_str(tmp.memory_str.index((h1, va1)))
+
+                                    if v['output'] == 'list_str':
+                                        if tmp.done():
+                                            for ret_val in returned:
+                                                tmp.append_result(
+                                                    command,
+                                                    f'{ret_val}/' + str(f'{obj_compare(masked_val[1], ret_val)}'))
+                                                finished.append((tmp, ret_val))
+                                    else:
+                                        raise ValueError('error, output of scope')
 
                 else:
                     continue
@@ -1719,6 +1828,10 @@ def test_1():
 
     # print(parse_it("2-11963536-8.html.csv",
     #                "the match on 16 march 2008 had the highest attendance of all the matches ."))
+
+    # To try out
+    print(parse_it("2-1140080-2.html.csv",
+                   "in the 1979 formula one season , the german grand prix was 15 days after the british grand prix ."))
 
     # No programs
     ## reason: Entity linker is not able to link the word "resignation" to the entity "resigned march 4 , 1894"

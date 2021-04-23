@@ -670,6 +670,8 @@ def fuzzy_comp_inv(t, col, type):
 def obj_compare(num1, num2, round=False, type="eq"):
     tolerance = 0.15 if round else 1e-9
     # both numeric
+    if isinstance(num1, (list, tuple)) or isinstance(num2, (list, tuple)):
+        raise ValueError(f"Bad input to obj_compare num1: {num1}, num2: {num2}")
     try:
         num_1 = float(num1)
         num_2 = float(num2)
@@ -688,6 +690,10 @@ def obj_compare(num1, num2, round=False, type="eq"):
             return num_1 < num_2
         elif type == "diff":
             return num_1 - num_2
+        elif type == "greater_eq":
+            return num_1 >= num_2
+        elif type == "less_eq":
+            return num_1 <= num_2
     except ValueError:
         # strings
         # mixed numbers and strings
@@ -760,12 +766,18 @@ def obj_compare(num1, num2, round=False, type="eq"):
             # for diff return string
             elif type == "diff":
                 return str((date_val1 - date_val2).days) + " days"
+            elif type == "greater_eq":
+                return date_val1 >= date_val2
+            elif type == "less_eq":
+                return date_val1 <= date_val2
 
         # mixed string and numerical
         val_pat1 = re.findall(pat_num, num1)
         val_pat2 = re.findall(pat_num, num2)
         if len(val_pat1) == 0 or len(val_pat2) == 0:
             # fall back to full string matching
+            num1 = num1.replace(" ", "")
+            num2 = num2.replace(" ", "")
             if type == "not_eq":
                 return (num1 not in num2) and (num2 not in num1)
             elif type == "eq":
@@ -805,6 +817,10 @@ def obj_compare(num1, num2, round=False, type="eq"):
             return num_1 < num_2
         elif type == "diff":
             return num_1 - num_2
+        elif type == "greater_eq":
+            return num_1 >= num_2
+        elif type == "less_eq":
+            return num_1 <= num_2
         else:
             raise ValueError(f"Unsupported type: {type}")
 
