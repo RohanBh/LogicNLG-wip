@@ -617,6 +617,7 @@ def fuzzy_comp_inv(t, col, type):
     year_list[year_list < 1677] = 1678
     day_list = day_list.fillna("1").astype("int")
     day_list[day_list > 30] = 30
+    day_list[day_list <= 0] = 1
     month_num_list = month_num_list.fillna("1").astype("int")
 
     date_frame = pd.to_datetime(pd.DataFrame({'year': year_list, 'month': month_num_list, 'day': day_list}),
@@ -710,73 +711,76 @@ def obj_compare(num1, num2, round=False, type="eq"):
         # dates
         # num1
         if len(re.findall(pat_month, num1)) > 0:
-            year_val1 = re.findall(pat_year, num1)
-            if len(year_val1) == 0:
-                year_val1 = int("2260")
-            else:
-                year_val1 = int(year_val1[0])
-
-            day_val1 = re.findall(pat_day, num1)
-            if len(day_val1) == 0:
-                day_val1 = int("1")
-            else:
-                day_val1 = int(day_val1[0])
-
-            month_val1 = re.findall(pat_month, num1)
-            if len(month_val1) == 0:
-                month_val1 = int("1")
-            else:
-                month_val1 = month_map[month_val1[0]]
-
             try:
-                date_val1 = pd.datetime(year_val1, month_val1, day_val1)
+                year_val1 = re.findall(pat_year, num1)
+                if len(year_val1) == 0:
+                    year_val1 = int("2260")
+                else:
+                    year_val1 = int(year_val1[0])
+
+                day_val1 = re.findall(pat_day, num1)
+                if len(day_val1) == 0:
+                    day_val1 = int("1")
+                else:
+                    day_val1 = int(day_val1[0])
+
+                month_val1 = re.findall(pat_month, num1)
+                if len(month_val1) == 0:
+                    month_val1 = int("1")
+                else:
+                    month_val1 = month_map[month_val1[0]]
+
+                try:
+                    date_val1 = pd.datetime(year_val1, month_val1, day_val1)
+                except:
+                    raise ValueError(f"Unable to convert val to datetime: {num1}")
+
+                # num2
+                year_val2 = re.findall(pat_year, num2)
+                if len(year_val2) == 0:
+                    year_val2 = int("2260")
+                else:
+                    year_val2 = int(year_val2[0])
+
+                day_val2 = re.findall(pat_day, num2)
+                if len(day_val2) == 0:
+                    day_val2 = int("1")
+                else:
+                    day_val2 = int(day_val2[0])
+
+                month_val2 = re.findall(pat_month, num2)
+                if len(month_val2) == 0:
+                    month_val2 = int("1")
+                else:
+                    month_val2 = month_map[month_val2[0]]
+
+                try:
+                    date_val2 = pd.datetime(year_val2, month_val2, day_val2)
+                except:
+                    raise ValueError(f"Unable to convert val to datetime: {num2}")
+
+                # if negate:
+                #   return date_val1 != date_val2
+                # else:
+                #   return date_val1 == date_val2
+
+                if type == "eq":
+                    return date_val1 == date_val2
+                elif type == "not_eq":
+                    return date_val1 != date_val2
+                elif type == "greater":
+                    return date_val1 > date_val2
+                elif type == "less":
+                    return date_val1 < date_val2
+                # for diff return string
+                elif type == "diff":
+                    return str((date_val1 - date_val2).days) + " days"
+                elif type == "greater_eq":
+                    return date_val1 >= date_val2
+                elif type == "less_eq":
+                    return date_val1 <= date_val2
             except:
-                raise ValueError(f"Unable to convert val to datetime: {num1}")
-
-            # num2
-            year_val2 = re.findall(pat_year, num2)
-            if len(year_val2) == 0:
-                year_val2 = int("2260")
-            else:
-                year_val2 = int(year_val2[0])
-
-            day_val2 = re.findall(pat_day, num2)
-            if len(day_val2) == 0:
-                day_val2 = int("1")
-            else:
-                day_val2 = int(day_val2[0])
-
-            month_val2 = re.findall(pat_month, num2)
-            if len(month_val2) == 0:
-                month_val2 = int("1")
-            else:
-                month_val2 = month_map[month_val2[0]]
-
-            try:
-                date_val2 = pd.datetime(year_val2, month_val2, day_val2)
-            except:
-                raise ValueError(f"Unable to convert val to datetime: {num2}")
-
-            # if negate:
-            #   return date_val1 != date_val2
-            # else:
-            #   return date_val1 == date_val2
-
-            if type == "eq":
-                return date_val1 == date_val2
-            elif type == "not_eq":
-                return date_val1 != date_val2
-            elif type == "greater":
-                return date_val1 > date_val2
-            elif type == "less":
-                return date_val1 < date_val2
-            # for diff return string
-            elif type == "diff":
-                return str((date_val1 - date_val2).days) + " days"
-            elif type == "greater_eq":
-                return date_val1 >= date_val2
-            elif type == "less_eq":
-                return date_val1 <= date_val2
+                pass
 
         # mixed string and numerical
         val_pat1 = re.findall(pat_num, num1)

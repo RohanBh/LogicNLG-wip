@@ -1813,8 +1813,8 @@ class Parser(object):
         table_name, sent, logic_json, action = inputs
         formatted_sent = re.sub(r"[^\w\s]", '', sent)
         formatted_sent = re.sub(r"\s+", '-', formatted_sent)
-        if len(formatted_sent) > 20:
-            formatted_sent = formatted_sent[-20:]
+        if len(formatted_sent) > 100:
+            formatted_sent = formatted_sent[-100:]
         if not os.path.exists('tmp/results/{}.json'.format(formatted_sent)):
             sent, pos_tags = self.normalize(sent)
             raw_sent = " ".join(sent)
@@ -1964,10 +1964,33 @@ def test_2():
     return
 
 
+def test_3(idx=None):
+    parser = Parser("data/all_csv")
+
+    with open('data/l2t/train.json', 'r') as f:
+        data = json.load(f)
+
+    if idx is not None:
+        data = [data[idx]]
+
+    for entry in data:
+        sent = entry['sent']
+        table_name = entry['url'][entry['url'].find('all_csv/') + 8:]
+        logic_json = entry['logic']
+        action = entry['action']
+        print("Table:", table_name)
+        print("Title:", parser.title_mapping[table_name])
+        print("Sent:", sent)
+        print(parser.parse(table_name, sent, logic_json, action, True))
+
+        print()
+    return
+
+
 def generate_programs():
     parser = Parser("data/all_csv")
 
-    with open('data/train_lm.json', 'r') as f:
+    with open('data/l2t/train.json', 'r') as f:
         data = json.load(f)
 
     args = []
@@ -1987,5 +2010,5 @@ def generate_programs():
 
 
 if __name__ == "__main__":
-    test_2()
+    test_3(26)
     # generate_programs()
