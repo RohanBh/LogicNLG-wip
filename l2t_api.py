@@ -452,6 +452,7 @@ class ExeError(Exception):
 # filter_str_eq / not_eq
 # Type: col - str_col, val - str
 def fuzzy_match_filter(t, col, val, negate=False):
+    val = str(val)
     trim_t = t[col].str.replace(" ", "")
     trim_val = val.replace(" ", "")
 
@@ -612,10 +613,14 @@ def fuzzy_comp_inv(t, col, type):
 
     # pandas at most 2262
     year_list = year_list.fillna("2260").astype("int")
+    year_list[year_list > 2262] = 2261
+    year_list[year_list < 1677] = 1678
     day_list = day_list.fillna("1").astype("int")
+    day_list[day_list > 30] = 30
     month_num_list = month_num_list.fillna("1").astype("int")
 
-    date_frame = pd.to_datetime(pd.DataFrame({'year': year_list, 'month': month_num_list, 'day': day_list}))
+    date_frame = pd.to_datetime(pd.DataFrame({'year': year_list, 'month': month_num_list, 'day': day_list}),
+                                infer_datetime_format=True)
     date_values = sorted(date_frame)
 
     pats = t[col].str.extract(pat_add, expand=False)
@@ -633,6 +638,8 @@ def fuzzy_comp_inv(t, col, type):
     nums = sorted(nums)
 
     if 'gt' in type:
+        if len(t) < 3 and type[0] == 'm':
+            raise ExeError(f"Can't apply most on table of length {len(t)}")
         idx = 0 if type[0] == 'a' else len(t) - len(t) // 3
         if 'gte' in type:
             return nums[idx], date_values[idx]
@@ -653,10 +660,10 @@ def fuzzy_comp_inv(t, col, type):
                     list(c_dt.keys())[0] if len(c_dt) == 1 else None)
         if type == 'meq':
             num_opt, dt_opt = [], []
-            for k, v in c_num:
+            for k, v in c_num.items():
                 if v >= len(t) // 3:
                     num_opt.append(k)
-            for k, v in c_dt:
+            for k, v in c_dt.items():
                 if v >= len(t) // 3:
                     dt_opt.append(k)
             if not (len(num_opt) > 0 or len(dt_opt) > 0):
@@ -970,7 +977,7 @@ def str_eq_inv(t, col, type):
         return list(ctr.keys())[0]
     if type == 'most':
         vals = []
-        for k, v in ctr:
+        for k, v in ctr.items():
             if v >= len(t) // 3:
                 vals.append(k)
         if len(vals) == 0:
@@ -990,7 +997,7 @@ def gl_inv(t, col1, val, col2, type):
     ret_vals = []
     for tmp2, hop_val in zip(t[col2], t[col1]):
         if obj_compare(tmp1, tmp2, type=type):
-            ret_vals.append(hop_op(t, hop_val))
+            ret_vals.append(hop_val)
     if len(ret_vals) == 0:
         raise ExeError(f"No rows found {type} than {tmp1} in col {col2}")
     return ret_vals
@@ -1007,7 +1014,7 @@ def gl_inv_str(t, col1, val, col2, type):
     ret_vals = []
     for tmp2, hop_val in zip(t[col2], t[col1]):
         if obj_compare(tmp1, tmp2, type=type):
-            ret_vals.append(hop_op(t, hop_val))
+            ret_vals.append(hop_val)
     if len(ret_vals) == 0:
         raise ExeError(f"No rows found {type} than {tmp1} in col {col2}")
     return ret_vals

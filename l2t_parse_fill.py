@@ -170,6 +170,8 @@ class Node(object):
             return 'str'
         if any(x[0] == header for x in self.memory_date) or any(x == header for x in self.header_date):
             return 'date'
+        if header == 'tmp_count':
+            return 'num'
         raise ValueError(f"Unseen header: {header}")
 
     def add_memory_num(self, header, val, command):
@@ -338,6 +340,7 @@ class FailedCommand:
 
 def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_date, head_str,
                         head_num, head_date, masked_val, num=6, debug=False):
+    masked_val = (masked_val[0], str(masked_val[1]))
     must_have = []
     must_not_have = []
     # Goes through non_triggers and absence of any triggers marks those
@@ -533,7 +536,6 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                             if len(row) == 1:
                                 continue
                             for l in range(len(root.obj_headers)):
-                                # TODO: Verify that header_num never contains tmp_input and ntharg
                                 command = v['tostr'](row_h, root.obj_headers[l])
                                 if not root.exist(command):
                                     returned = call(command, v['function'], row, root.obj_headers[l])
@@ -594,6 +596,8 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                             elif len(re.findall(pat_num, masked_val[1])) > 0:
                                                 ix = 0
                                             if ix is not None:
+                                                if returned[ix] is None:
+                                                    continue
                                                 for ret_val in returned[ix]:
                                                     tmp.append_result(
                                                         command,
@@ -789,18 +793,18 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                         # It does not make sense to do greater_inv, less_inv operation on one row
                         if len(row) == 1:
                             continue
-                        for i, (h1, va1) in enumerate(root.memory_str):
+                        for i, (h1, va1) in enumerate(root.memories):
                             if "tmp_" in h1 or h1 == 'ntharg':
                                 continue
                             for l in range(len(root.obj_headers)):
-                                command = v['tostr'](row_h, h1, root.trace_str[i], root.obj_headers[l])
+                                command = v['tostr'](row_h, h1, va1, root.obj_headers[l])
                                 if not root.exist(command):
                                     returned = call(command, v['function'], row, h1, va1, root.obj_headers[l])
                                     if isinstance(returned, FailedCommand):
                                         continue
                                     tmp = root.clone(command, k)
                                     tmp.inc_row_counter(j)
-                                    tmp.delete_memory_str(tmp.memory_str.index((h1, va1)))
+                                    tmp.delete_memory_str(tmp.memories.index((h1, va1)))
 
                                     if v['output'] == 'list_str':
                                         if tmp.done():
@@ -1026,7 +1030,8 @@ def recover(buf, recover_dict, content):
     else:
         new_buf = []
         for w in buf.split(' '):
-            if w not in content:
+            # Changed `from w not in content` prevents cases like get not in '... gets ...'. get should be recovered
+            if w not in content.split(' '):
                 new_buf.append(recover_dict.get(w, w))
             else:
                 new_buf.append(w)
@@ -1774,15 +1779,15 @@ class Parser(object):
         def get_old_val(_x):
             return 'tmp_input' if _x == 'msk_input' else _x[4:]
 
-        def remove_h(_h, _mem):
+        def remove_h(_p, _mem):
             new_mem = []
-            for (__h, _v) in _mem:
-                if __h == _h:
+            for __p in _mem:
+                if _p == __p:
                     continue
-                new_mem.append((__h, _v))
+                new_mem.append(__p)
             return new_mem
 
-        og_val = get_old_val(masked_val[0])
+        og_val = (get_old_val(masked_val[0]), masked_val[1])
         mem_str, mem_num, mem_date = remove_h(og_val, mem_str), remove_h(og_val, mem_num), remove_h(og_val, mem_date)
 
         if debug:
@@ -1805,38 +1810,61 @@ class Parser(object):
         return sha.hexdigest()[:16]
 
     def distribute_parse(self, inputs):
-        table_name, sent = inputs
-        hash_id = self.hash_string(sent)
-        if not os.path.exists('tmp/results/{}.json'.format(hash_id)):
+        table_name, sent, logic_json, action = inputs
+        formatted_sent = re.sub(r"[^\w\s]", '', sent)
+        formatted_sent = re.sub(r"\s+", '-', formatted_sent)
+        if len(formatted_sent) > 20:
+            formatted_sent = formatted_sent[-20:]
+        if not os.path.exists('tmp/results/{}.json'.format(formatted_sent)):
             sent, pos_tags = self.normalize(sent)
             raw_sent = " ".join(sent)
             linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
-            masked_sent, mem_str, mem_num, head_str, head_num, non_linked_num, mapping = self.initialize_buffer(
-                table_name, linked_sent, pos, raw_sent)
+            # mem_str, mem_num, mem_date, head_str, head_num, head_date,
+            ret_val = self.initialize_buffer(table_name, linked_sent, pos, raw_sent)
+            masked_sent, mem_str, mem_num, mem_date, head_str, head_num, head_date, non_linked_num, mapping = ret_val
 
-            if len(mem_num) + len(non_linked_num) == 0:
+            masked_val = None
+            if action in ['comparative', 'majority']:
+                masked_val = self.mask_highest_lo_entity_1(mem_num, mem_str, non_linked_num, logic_json)
+            if masked_val is None:
+                masked_val = self.mask_highest_lo_entity_2(mem_num, mem_str, non_linked_num, logic_json)
+            if masked_val is None:
                 return None
 
-            mem_num = self.mask_random_number(mem_num, non_linked_num)
+            def get_old_val(_x):
+                return 'tmp_input' if _x == 'msk_input' else _x[4:]
 
-            result = self.run(table_name, raw_sent, masked_sent, pos, mem_str, mem_num, head_str, head_num)
-            # Filter results to include only True ones
+            def remove_h(_p, _mem):
+                new_mem = []
+                for __p in _mem:
+                    if _p == __p:
+                        continue
+                    new_mem.append(__p)
+                return new_mem
+
+            og_val = (get_old_val(masked_val[0]), masked_val[1])
+            mem_str, mem_num, mem_date = (remove_h(og_val, mem_str),
+                                          remove_h(og_val, mem_num),
+                                          remove_h(og_val, mem_date))
+
+            result = self.run(table_name, raw_sent, masked_sent, pos, mem_str, mem_num,
+                              mem_date, head_str, head_num, head_date, masked_val)
             c = list(set(result))
             result = [x for x in c if '/True' in x]
 
-            with open('tmp/results/{}.json'.format(hash_id), 'w') as f:
-                json.dump((inputs[0], inputs[1], mem_num, len(c), result), f, indent=2)
+            with open('tmp/results/{}.json'.format(formatted_sent), 'w') as f:
+                json.dump((inputs[0], inputs[1], masked_val, len(c), result), f, indent=2)
 
             return inputs[0], inputs[1], mem_num, len(c), result
         else:
-            with open('tmp/results/{}.json'.format(hash_id), 'r') as f:
+            with open('tmp/results/{}.json'.format(formatted_sent), 'r') as f:
                 data = json.load(f)
             return data
 
 
 def test_1():
     def get_logic_json(tbl, sent):
-        with open('data/l2t/train.json') as f:
+        with open('data/l2t/all_data.json') as f:
             data = json.load(f)
         for ent in data:
             if (ent['url'] ==
@@ -1859,6 +1887,13 @@ def test_1():
     # parse_it("2-14173105-18.html.csv",
     #          "in the 1999-2000 philadelphia flyers season , the player who was selected 2nd is jeff feniak .")
 
+    # Works
+    # print(parse_it("2-13014020-6.html.csv",
+    #                "philipp petzschner partnered with j\u00fcrgen melzer "
+    #                "for the majority of his tennis doubles tournaments ."))
+    # print(parse_it("2-17443121-2.html.csv",
+    #                "the episode entitled gary marries off his ex aired seven days after gary gets boundaries ."))
+
     # Warning about regex
     # parse_it("2-12326046-2.html.csv",
     #          "the opole tournament was the only one in which ana jovanovi\u0107 used a carpet ( i ) surface .")
@@ -1867,12 +1902,6 @@ def test_1():
     #                "the match on 16 march 2008 had the highest attendance of all the matches ."))
 
     # To try out
-    # print(parse_it("2-1140080-2.html.csv",
-    #                "in the 1979 formula one season , "
-    #                "the german grand prix was 15 days after the british grand prix ."))
-    print(parse_it("2-13014020-6.html.csv",
-                   "philipp petzschner partnered with j\u00fcrgen melzer "
-                   "for the majority of his tennis doubles tournaments ."))
 
     # No programs
     ## reason: Entity linker is not able to link the word "resignation" to the entity "resigned march 4 , 1894"
@@ -1886,6 +1915,25 @@ def test_1():
     ## reason: No trigger words for sum present here
     # print(parse_it("1-27922491-8.html.csv",
     #                "the members of the somerset county cricket club in 2009 played in 84 matches ."))
+    # We need the "attendance" column as a header but "attended" word is never linked to that header
+    # print(parse_it("1-10361453-2.html.csv",
+    #                "the game against green bay packers on september 15 was "
+    #                "better attended than the game against chicago bears on november 3 ."))
+    ## reason: ('episode', 'gary get boundaries') is the mem_str we get, but the actual entity is 'gary gets boundaries'
+    # we are not able to do a filter
+    # print(parse_it("2-17443121-2.html.csv",
+    #                "the episode entitled gary marries off his ex aired seven days after gary gets boundaries ."))
+    ## reason: 10 is thought of as a number by the entity linker
+    # print(parse_it("1-1341423-35.html.csv",
+    #                "for the united states house of representatives election in 2000 ,"
+    #                " of the incumbents that were re-elected , the one with the 2nd most "
+    #                "recent first election date was from ohio district 10 ."))
+
+    # Wrong program
+    ## reason: 15 days is not linked to the column "date"
+    # print(parse_it("2-1140080-2.html.csv",
+    #                "in the 1979 formula one season , "
+    #                "the german grand prix was 15 days after the british grand prix ."))
     return
 
 
@@ -1896,15 +1944,18 @@ def test_2():
     sent = entry['sent']
     table = entry['url'][entry['url'].find('all_csv/') + 8:]
     logic_json = entry['logic']
+    action = entry['action']
 
     parser = Parser("data/l2t/all_csv")
-    check = parser.parse(table, sent, logic_json, True)
+    check = parser.parse(table, sent, logic_json, action, True)
     while check is None:
         entry = data[np.random.choice(len(data), 1)[0]]
         sent = entry['sent']
         table = entry['url'][entry['url'].find('all_csv/') + 8:]
         logic_json = entry['logic']
-        check = parser.parse(table, sent, logic_json, True)
+        action = entry['action']
+        print(entry['logic_str'])
+        check = parser.parse(table, sent, logic_json, action, True)
 
     print("Table:", table)
     print("Title:", parser.title_mapping[table])
@@ -1919,19 +1970,19 @@ def generate_programs():
     with open('data/train_lm.json', 'r') as f:
         data = json.load(f)
 
-    table_names = []
-    sents = []
-    for k, vs in data.items():
-        for v in vs:
-            table_names.append(k)
-            sents.append(v[0])
+    args = []
+    for entry in data:
+        sent = entry['sent']
+        table_name = entry['url'][entry['url'].find('all_csv/') + 8:]
+        logic_json = entry['logic']
+        action = entry['action']
+        args.append((table_name, sent, logic_json, action))
 
     with mp.Pool(mp.cpu_count()) as pool:
-        results = list(tqdm(pool.imap(parser.distribute_parse, zip(table_names, sents)), total=len(table_names)))
+        results = list(tqdm(pool.imap(parser.distribute_parse, args), total=len(args)))
 
     with open("data/programs.json", 'w') as f:
         json.dump(results, f, indent=2)
-
     return
 
 
