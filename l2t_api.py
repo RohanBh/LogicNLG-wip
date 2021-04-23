@@ -492,8 +492,10 @@ def fuzzy_compare_filter(t, col, val, type):
         # print (year_list)
         # print (day_list)
         # print (month_num_list)
-
-        date_frame = pd.to_datetime(pd.DataFrame({'year': year_list, 'month': month_num_list, 'day': day_list}))
+        try:
+            date_frame = pd.to_datetime(pd.DataFrame({'year': year_list, 'month': month_num_list, 'day': day_list}))
+        except:
+            raise ExeError("Can't create datetime df")
         # print (date_frame)
 
         # for val
@@ -515,7 +517,10 @@ def fuzzy_compare_filter(t, col, val, type):
         else:
             month_val = month_map[month_val[0]]
 
-        date_val = pd.datetime(year_val, month_val, day_val)
+        try:
+            date_val = pd.datetime(year_val, month_val, day_val)
+        except:
+            raise ExeError("Can't create datetime val")
         # print (date_val)
 
         if type == "greater":
@@ -613,8 +618,8 @@ def fuzzy_comp_inv(t, col, type):
 
     # pandas at most 2262
     year_list = year_list.fillna("2260").astype("int")
-    year_list[year_list > 2262] = 2261
-    year_list[year_list < 1677] = 1678
+    year_list[year_list >= 2262] = 2261
+    year_list[year_list <= 1677] = 1678
     day_list = day_list.fillna("1").astype("int")
     day_list[day_list > 30] = 30
     day_list[day_list <= 0] = 1
@@ -794,7 +799,7 @@ def obj_compare(num1, num2, round=False, type="eq"):
             elif type == "eq":
                 return num1 in num2 or num2 in num1
             else:
-                raise ValueError(f"Unsupported type: {type}")
+                raise ExeError(f"Unsupported type: {type}")
 
         num_1 = val_pat1[0].replace(",", "")
         num_1 = num_1.replace(":", "")
@@ -1011,6 +1016,7 @@ def gl_inv_str(t, col1, val, col2, type):
     """
     type: greater, less
     """
+    t[col1] = t[col1].astype('str')
     df = fuzzy_match_filter(t, col1, val)
     if len(df) != 1:
         raise ExeError(f"Can't apply obj-{type}-inv for the filter col {col1} and val {val}")

@@ -275,8 +275,8 @@ class Node(object):
             if k in args:
                 continue
             else:
-                new_mem_date.append(self.memory_str[k])
-                new_trace_date.append(self.trace_str[k])
+                new_mem_date.append(self.memory_date[k])
+                new_trace_date.append(self.trace_date[k])
 
         self.memory_date = new_mem_date
         self.trace_date = new_trace_date
@@ -1828,7 +1828,10 @@ class Parser(object):
         if not os.path.exists('tmp/results/{}.json'.format(formatted_sent)):
             sent, pos_tags = self.normalize(sent)
             raw_sent = " ".join(sent)
-            linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
+            try:
+                linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
+            except AssertionError:
+                return None
             # mem_str, mem_num, mem_date, head_str, head_num, head_date,
             ret_val = self.initialize_buffer(table_name, linked_sent, pos, raw_sent)
             masked_sent, mem_str, mem_num, mem_date, head_str, head_num, head_date, non_linked_num, mapping = ret_val
@@ -2012,7 +2015,7 @@ def generate_programs():
         args.append((table_name, sent, logic_json, action))
 
     with mp.Pool(mp.cpu_count()) as pool:
-        results = list(tqdm(pool.imap(parser.distribute_parse, args), total=len(args)))
+        results = list(tqdm(pool.imap_unordered(parser.distribute_parse, args, chunksize=1), total=len(args)))
 
     with open("data/programs.json", 'w') as f:
         json.dump(results, f, indent=2)
@@ -2020,5 +2023,5 @@ def generate_programs():
 
 
 if __name__ == "__main__":
-    test_3(264)
+    test_3(6127)
     # generate_programs()
