@@ -5,6 +5,8 @@ from pathlib import Path
 
 import numpy as np
 
+from l2t_api import type2funcs
+
 
 def create_csvs():
     base_dir = Path('data', 'l2t', 'all_csv')
@@ -54,7 +56,7 @@ def print_all_first_funcs():
     return
 
 
-def print_type_2_func():
+def print_type_2_funccount(sorted_order=False, debug=False):
     with open('data/l2t/all_data.json', 'r') as f:
         data = json.load(f)
 
@@ -71,48 +73,32 @@ def print_type_2_func():
     for entry in data:
         action = entry['action']
         if action not in type2set:
-            type2set[action] = set()
-        type2set[action].update(recursive_get(entry['logic']))
-
-    for action in type2set:
-        type2set[action] -= set(f for f in type2set[action] if 'filter' in f or 'hop' in f or 'and' in f)
-    pprint.pprint(type2set)
-    return
-
-
-def print_type_2_funccount(sorted_order=False):
-    with open('data/l2t/all_data.json', 'r') as f:
-        data = json.load(f)
-
-    def update_ctr(d1, d2):
-        for k, v in d1.items():
-            if k not in d2:
-                d2[k] = 0
-            d2[k] += v
-        return
-
-    def recursive_get(logic_json):
-        all_funcs = {logic_json['func']: 1}
-        for arg in logic_json['args']:
-            if type(arg) is dict:
-                update_ctr(recursive_get(arg), all_funcs)
-            else:
-                continue
-        return all_funcs
-
-    type2set = {}
-    for entry in data:
-        action = entry['action']
-        if action not in type2set:
             type2set[action] = {}
-        update_ctr(recursive_get(entry['logic']), type2set[action])
+        all_funcs_in_curr_entry = recursive_get(entry['logic'])
+        for f in all_funcs_in_curr_entry:
+            if f not in type2set[action]:
+                type2set[action][f] = 0
+            type2set[action][f] += 1
+        main_funcs = all_funcs_in_curr_entry.intersection(type2funcs[action])
+        if len(main_funcs) == 0:
+            if 'missing' not in type2set[action]:
+                type2set[action]['missing'] = 0
+            type2set[action]['missing'] += 1
+        if debug:
+            if len(main_funcs) > 1:
+                print(main_funcs)
+                print(entry['logic_str'])
 
+    # for action in type2set:
+    #     type2set[action] -= set(f for f in type2set[action] if 'filter' in f or 'hop' in f or 'and' in f)
     helper_funcs = ['round_eq', 'eq', 'not_eq', 'not_str_eq', 'str_eq']
     for action in type2set:
         for k in list(type2set[action].keys()):
             if 'filter' in k or 'hop' in k or 'and' in k or k in helper_funcs:
                 del type2set[action][k]
 
+    for action in type2set:
+        act_tot = sum(type2set[action].values())
     if not sorted_order:
         pprint.pprint(type2set)
     else:
@@ -121,11 +107,62 @@ def print_type_2_funccount(sorted_order=False):
             pairs = sorted(type2set[action].items(), key=lambda x: (x[-1], x[0]), reverse=True)
             new_type2set[action] = dict(pairs)
         pprint.pprint(new_type2set, sort_dicts=False)
-
-    # pairs = sorted(type2set['majority'].items(), key=lambda x: (x[-1], x[0]), reverse=True)
-    # print("Majority:")
-    # pprint.pprint(dict(pairs), sort_dicts=False)
     return
+
+
+# def print_type_2_funccount(sorted_order=False):
+#     with open('data/l2t/all_data.json', 'r') as f:
+#         data = json.load(f)
+#
+#     def update_ctr(d1, d2):
+#         for k, v in d1.items():
+#             if k not in d2:
+#                 d2[k] = 0
+#             d2[k] += v
+#         return
+#
+#     def recursive_get(logic_json):
+#         all_funcs = {logic_json['func']: 1}
+#         for arg in logic_json['args']:
+#             if type(arg) is dict:
+#                 update_ctr(recursive_get(arg), all_funcs)
+#             else:
+#                 continue
+#         return all_funcs
+#
+#     type2set = {}
+#     action2ct = {}
+#     for entry in data:
+#         action = entry['action']
+#         if action not in type2set:
+#             type2set[action] = {}
+#             action2ct[action] = 0
+#         action2ct[action] += 1
+#         update_ctr(recursive_get(entry['logic']), type2set[action])
+#
+#     helper_funcs = ['round_eq', 'eq', 'not_eq', 'not_str_eq', 'str_eq']
+#     for action in type2set:
+#         for k in list(type2set[action].keys()):
+#             if 'filter' in k or 'hop' in k or 'and' in k or k in helper_funcs:
+#                 del type2set[action][k]
+#
+#     for action in type2set:
+#         act_tot = sum(type2set[action].values())
+#         if act_tot != action2ct[action]:
+#             type2set[action]['missing'] = action2ct[action] - act_tot
+#     if not sorted_order:
+#         pprint.pprint(type2set)
+#     else:
+#         new_type2set = {}
+#         for action in sorted(type2set.keys()):
+#             pairs = sorted(type2set[action].items(), key=lambda x: (x[-1], x[0]), reverse=True)
+#             new_type2set[action] = dict(pairs)
+#         pprint.pprint(new_type2set, sort_dicts=False)
+#
+#     # pairs = sorted(type2set['majority'].items(), key=lambda x: (x[-1], x[0]), reverse=True)
+#     # print("Majority:")
+#     # pprint.pprint(dict(pairs), sort_dicts=False)
+#     return
 
 
 def check_ordinal_property():
@@ -204,7 +241,51 @@ def check_comp_property():
     return
 
 
+def find_comp_eq():
+    """This func tries to find the count of the instances of type: eq { hop {...}, hop {...} }"""
+    with open('data/l2t/all_data.json', 'r') as f:
+        data = json.load(f)
+
+    def get_main_logic(logic_json):
+        if type(logic_json) is not dict:
+            return None
+        if logic_json['func'] in ['eq', 'str_eq', 'round_eq']:
+            l, r = logic_json['args']
+            if isinstance(l, dict) and isinstance(r, dict):
+                b1 = 'hop' in l['func'] and 'hop' in r['func']
+                return logic_json['tostr'], b1
+            return None
+
+        res = [get_main_logic(arg) for arg in logic_json['args']]
+        res = [x for x in res if x is not None]
+        if len(res) > 1:
+            print(logic_json['tostr'])
+            print("Wow!!!!!")
+        return res[0] if len(res) > 0 else None
+
+    count = 0
+    tot_ct = 0
+    fn_strs = []
+    for entry in data:
+        # if entry['action'] != 'comparative':
+        #     continue
+        ret = get_main_logic(entry['logic'])
+        if ret is None:
+            continue
+        tot_ct += 1
+        logic_str, r1 = ret
+        if not r1:
+            fn_strs.append(logic_str)
+            count += 1
+
+    print("Total times eq didn't have two hops", count, 'out of', tot_ct)
+    if len(fn_strs) > 0:
+        print(np.random.choice(fn_strs, 10))
+    return
+
+
 def check_num_rows():
+    """Checks how many rows the tables in the dataset have."""
     with open('data/l2t/all_data.json', 'r') as f:
         data = json.load(f)
 
@@ -218,8 +299,9 @@ def check_num_rows():
 
 if __name__ == '__main__':
     # print_all_first_funcs()
-    # print_type_2_func()
+    # missing entries in comp comes from not including 'eq' on two hops
     print_type_2_funccount(sorted_order=True)
     # check_ordinal_property()
     # check_comp_property()
     # check_num_rows()
+    # find_comp_eq()

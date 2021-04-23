@@ -1674,13 +1674,12 @@ class Parser(object):
         sent, _, pos_tags = self.get_lemmatize(sent, True)
         return sent, pos_tags
 
-    def mask_highest_lo_entity(self, mem_num, mem_str, non_linked_num, logic_json):
+    def get_aux_objs_mhle(self, mem_num, mem_str, non_linked_num):
         all_entities = mem_num + mem_str + non_linked_num
 
         def check_eq(a):
             for k, v in all_entities:
-                if obj_compare(a, v, round=True, type="eq") or (
-                        v is str and str(v) in str(a) or str(a) in str(v)):
+                if obj_compare(a, v, round=True, type="eq"):
                     return k, v
             return None
 
@@ -1694,11 +1693,46 @@ class Parser(object):
                 k = 'msk_' + k
             return k, v
 
+        return all_entities, check_eq, get_new_header
+
+    def mask_highest_lo_entity_1(self, mem_num, mem_str, non_linked_num, logic_json):
+        if not isinstance(logic_json, dict):
+            return None
+
+        all_entities, check_eq, get_new_header = self.get_aux_objs_mhle(mem_num, mem_str, non_linked_num)
+
+        handled_majority_types = {'most_str_eq', 'all_str_eq', 'most_greater', 'most_less', 'most_greater_eq',
+                                  'most_less_eq', 'all_greater', 'all_greater_eq', 'all_less', 'all_less_eq', 'most_eq',
+                                  'all_eq'}
+
+        if logic_json['func'] in ['greater', 'less']:
+            order = [0, 1] if np.random.uniform() < 0.5 else [1, 0]
+            for ix in order:
+                arg = logic_json['args'][ix]
+                # arg is a hop { filter_eq {
+                r = check_eq(arg['args'][0]['args'][-1])
+                if r is not None:
+                    return get_new_header(r)
+        elif logic_json['func'] in handled_majority_types:
+            # last arg is the entity
+            r = check_eq(logic_json['args'][-1])
+            if r is not None:
+                return get_new_header(r)
+        else:
+            for arg in logic_json['args']:
+                r = self.mask_highest_lo_entity_1(mem_num, mem_str, non_linked_num, arg)
+                if r is not None:
+                    return r
+        return None
+
+    def mask_highest_lo_entity_2(self, mem_num, mem_str, non_linked_num, logic_json):
+        all_entities, check_eq, get_new_header = self.get_aux_objs_mhle(mem_num, mem_str, non_linked_num)
+
         if logic_json['func'] in ['eq', 'str_eq', 'round_eq']:
             args = logic_json['args']
             if all(type(a) is dict for a in args):
                 for a in args:
-                    r = self.mask_highest_lo_entity(mem_num, mem_str, non_linked_num, a)
+                    r = self.mask_highest_lo_entity_2(mem_num, mem_str, non_linked_num, a)
                     if r is not None:
                         return r
             else:
@@ -1712,12 +1746,12 @@ class Parser(object):
             args = logic_json['args']
             if all(type(a) is dict for a in args):
                 for a in args:
-                    r = self.mask_highest_lo_entity(mem_num, mem_str, non_linked_num, a)
+                    r = self.mask_highest_lo_entity_2(mem_num, mem_str, non_linked_num, a)
                     if r is not None:
                         return r
         return None
 
-    def parse(self, table_name, og_sent, logic_json, debug=False):
+    def parse(self, table_name, og_sent, logic_json, action, debug=False):
         sent, pos_tags = self.normalize(og_sent)
         raw_sent = " ".join(sent)
         linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
@@ -1729,8 +1763,11 @@ class Parser(object):
         # if len(mem_num) + len(non_linked_num) == 0:
         #     return None
         # mem_num = self.mask_random_number(mem_num, non_linked_num, mask_num_ix)
-        masked_val = self.mask_highest_lo_entity(mem_num, mem_str, non_linked_num, logic_json)
-
+        masked_val = None
+        if action in ['comparative', 'majority']:
+            masked_val = self.mask_highest_lo_entity_1(mem_num, mem_str, non_linked_num, logic_json)
+        if masked_val is None:
+            masked_val = self.mask_highest_lo_entity_2(mem_num, mem_str, non_linked_num, logic_json)
         if masked_val is None:
             return
 
@@ -1805,7 +1842,7 @@ def test_1():
             if (ent['url'] ==
                     'https://raw.githubusercontent.com/wenhuchen/Table-Fact-Checking/master/data/all_csv/' + tbl):
                 if ent['sent'] == sent:
-                    return ent['logic']
+                    return ent['logic'], ent['action']
         raise ValueError("Bad input")
 
     parser = Parser("data/l2t/all_csv")
@@ -1816,8 +1853,8 @@ def test_1():
 
         print("Title:", parser.title_mapping[tbl])
         print("Table:", tbl)
-
-        return parser.parse(tbl, alt_sent, get_logic_json(tbl, sent), True)
+        a, b = get_logic_json(tbl, sent)
+        return parser.parse(tbl, alt_sent, a, b, True)
 
     # parse_it("2-14173105-18.html.csv",
     #          "in the 1999-2000 philadelphia flyers season , the player who was selected 2nd is jeff feniak .")
@@ -1830,8 +1867,12 @@ def test_1():
     #                "the match on 16 march 2008 had the highest attendance of all the matches ."))
 
     # To try out
-    print(parse_it("2-1140080-2.html.csv",
-                   "in the 1979 formula one season , the german grand prix was 15 days after the british grand prix ."))
+    # print(parse_it("2-1140080-2.html.csv",
+    #                "in the 1979 formula one season , "
+    #                "the german grand prix was 15 days after the british grand prix ."))
+    print(parse_it("2-13014020-6.html.csv",
+                   "philipp petzschner partnered with j\u00fcrgen melzer "
+                   "for the majority of his tennis doubles tournaments ."))
 
     # No programs
     ## reason: Entity linker is not able to link the word "resignation" to the entity "resigned march 4 , 1894"
@@ -1843,8 +1884,8 @@ def test_1():
     # print(parse_it("2-1027162-1.html.csv",
     #                "the lauryn williams competitions have an aggregate position of about 100 m."))
     ## reason: No trigger words for sum present here
-    print(parse_it("1-27922491-8.html.csv",
-                   "the members of the somerset county cricket club in 2009 played in 84 matches ."))
+    # print(parse_it("1-27922491-8.html.csv",
+    #                "the members of the somerset county cricket club in 2009 played in 84 matches ."))
     return
 
 
