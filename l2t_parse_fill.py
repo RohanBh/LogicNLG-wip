@@ -2,15 +2,20 @@ import copy
 import json
 import multiprocessing as mp
 import os
+import random
 import re
 import time
+import warnings
 
 import nltk
 import numpy as np
 import pandas
 import pandas as pd
+import torch
+import torch.nn.functional as F
 from nltk.corpus import wordnet
 from nltk.stem import WordNetLemmatizer
+from torch import nn, optim
 from tqdm.auto import tqdm
 from unidecode import unidecode
 
@@ -576,7 +581,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                                 tmp.append_result(
                                                     command,
                                                     f'{returned[1]}/' +
-                                                    str(f'{obj_compare(masked_val[1], returned[1], comp_type)}'))
+                                                    str(f'{obj_compare(masked_val[1], returned[1], type=comp_type)}'))
                                                 finished.append((tmp, returned[1]))
                                             elif len(re.findall(pat_num, masked_val[1])) > 0:
                                                 if returned[0] is None:
@@ -584,7 +589,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                                 tmp.append_result(
                                                     command,
                                                     f'{returned[0]}/' +
-                                                    str(f'{obj_compare(masked_val[1], returned[0], comp_type)}'))
+                                                    str(f'{obj_compare(masked_val[1], returned[0], type=comp_type)}'))
                                                 finished.append((tmp, returned[0]))
                                             else:
                                                 continue
@@ -1233,6 +1238,60 @@ def merge_strings(string, tags=None):
     return " ".join(words), " ".join(tags)
 
 
+def get_col_types(t):
+    col2type = {}
+    for i, col in enumerate(t.columns):
+        if isnumber(t[col].dtype):
+            col2type[i] = 'num'
+            continue
+        col_series = t[col].astype('str')
+        pats = col_series.str.extract(pat_add, expand=False)
+        if pats.isnull().all():
+            pats = col_series.str.extract(pat_num, expand=False)
+        if not pats.isnull().all():
+            col2type[i] = 'num'
+            continue
+        date_pats = col_series.str.extract(pat_month, expand=False)
+        if not date_pats.isnull().all():
+            col2type[i] = 'date'
+            continue
+        col2type[i] = 'str'
+
+    return col2type
+
+
+class MLPProjector(nn.Module):
+    def __init__(self, hidden_size=64, in_dim_1=300, in_dim_2=50, out_dim=300):
+        """
+        in_dim_1 is for the word_vec and in_dim_2 is for other cumulative features
+        Args:
+            hidden_size:
+            in_dim_1:
+            in_dim_2:
+            out_dim:
+        """
+        super(MLPProjector, self).__init__()
+        self.lstm = nn.LSTM(in_dim_1, hidden_size)
+        self.l1 = nn.Linear(hidden_size + in_dim_2, hidden_size)
+        self.l2 = nn.Linear(hidden_size, hidden_size)
+        self.l3 = nn.Linear(hidden_size, out_dim)
+        return
+
+    def forward(self, vector):
+        word_vecs = torch.FloatTensor(vector[:-1])
+        features = torch.FloatTensor(vector[-1])
+        # x -> (seq_len, batch, in_dim), out - (seq_len, batch, hidden_size)
+        word_vecs = torch.unsqueeze(word_vecs, 1)
+        features = torch.unsqueeze(features, 0)
+        features = torch.unsqueeze(features, 0)
+        out, (hn, cn) = self.lstm(word_vecs)
+        x = torch.cat([hn, features], dim=-1)
+        x = F.relu(self.l1(x))
+        x = F.relu(self.l2(x))
+        x = self.l3(x)
+        return x
+
+
 class Parser(object):
     def __init__(self, folder, lemmatize_verbs=True):
         self.folder = folder
@@ -1265,6 +1324,21 @@ class Parser(object):
                              "RP": wordnet.ADV}
 
         self.lemmatizer = WordNetLemmatizer()
+        self.model1 = None
+        self.model2 = None
+        self.optimizer = None
+        self.embeddings_dict = {}
+        with open("data/glove.6B.50d.txt", 'r', encoding="utf-8") as f:
+            for line in f:
+                values = line.split()
+                word = values[0]
+                vector = np.asarray(values[1:], "float32")
+                self.embeddings_dict[word] = vector
+        return
+
+    def get_embd(self, w):
+        w = str(w)
+        return np.average(list(self.embeddings_dict.get(_w, np.zeros(50)) for _w in w.split(' ')), axis=0)
 
     def get_lemmatize(self, words, return_pos):
         recover_dict = {}
@@ -1370,6 +1444,105 @@ class Parser(object):
 
         return sent, tags
 
+    def get_table2vecs(self, table_name):
+        table_title = self.title_mapping[table_name]
+        t = self.get_table(table_name)
+        idx2vec = {}
+        col2type = get_col_types(t)
+
+        for j, col in enumerate(t.columns):
+            features = []
+            if col2type[j] == 'num':
+                features.append(0)
+            elif col2type[j] == 'date':
+                features.append(1)
+            else:
+                features.append(2)
+            features.append(0)
+            features.append(j)
+            features.extend(np.average(list(self.get_embd(w) for w in t[col][:3]), axis=0))
+            idx2vec[(0, j)] = [self.get_embd(w) for w in col.split(' ')] + [features]
+
+        for i in range(t.shape[0]):
+            for j, col in enumerate(t.columns):
+                val = str(t.iloc[i, j])
+                features = []
+                if col2type[j] == 'num':
+                    features.append(0)
+                elif col2type[j] == 'date':
+                    features.append(1)
+                else:
+                    features.append(2)
+                features.append(i)
+                features.append(j)
+                nb_range = list(range(max(i - 2, 0), i)) + list(range(i + 1, min(t.shape[0] - 1, i + 2) + 1))
+                features.extend(np.average(list(self.get_embd(t.iloc[_i][j]) for _i in nb_range), axis=0))
+                idx2vec[(i + 1, j)] = [self.get_embd(w) for w in val.split(' ')] + [features]
+
+        features = [2, -1, -1] + [0] * 50
+        idx2vec[(-1, -1)] = [self.get_embd(w) for w in table_title.split(' ')] + [features]
+        return idx2vec
+
+    def new_entity_link(self, table_name, sent, pos):
+        inside = False
+        # whether at the index part of the linked entity
+        position = False
+        position_buf, mention_buf = '', ''
+        new_sent = ''
+        table2vec = self.get_table2vecs(table_name)
+        log_probs = []
+        for n in range(len(sent)):
+            if sent[n] == '#':
+                if position:
+                    i = int(split(position_buf, "row"))
+                    j = int(split(position_buf, "col"))
+
+                    features = [i, j]
+                    features.extend(
+                        np.average(list(self.get_embd(w) for w in sent.split(' ') if w not in ['#', ';', ',']), axis=0))
+                    vector = [self.get_embd(w) for w in mention_buf.split(' ')] + [features]
+                    if self.model1 is None:
+                        self.model1 = MLPProjector(in_dim_1=50, in_dim_2=len(features), out_dim=64)
+                        self.model1.train()
+                    sent_out = self.model1(vector)[0][0]
+                    probs = []
+                    all_actions = sorted(table2vec.keys())
+                    for i, j in all_actions:
+                        e_vector = table2vec[(i, j)]
+                        if self.model2 is None:
+                            self.model2 = MLPProjector(in_dim_1=50, in_dim_2=len(e_vector[-1]), out_dim=64)
+                            self.model2.train()
+                        e_out = self.model2(e_vector)[0][0]
+                        probs.append(torch.dot(sent_out, e_out))
+
+                    probs = torch.stack(probs)
+                    probs = F.softmax(probs, dim=-1)
+                    action_probs = torch.distributions.categorical.Categorical(probs)
+                    action = action_probs.sample()
+                    log_prob = action_probs.log_prob(action)
+                    log_probs.append(log_prob)
+
+                    new_sent += f'#{mention_buf};{all_actions[action][0]},{all_actions[action][1]}#'
+
+                    # Reset the buffer
+                    position_buf = ""
+                    mention_buf = ""
+                    inside = False
+                    position = False
+                else:
+                    inside = True
+            elif sent[n] == ';':
+                position = True
+            else:
+                if position:
+                    position_buf += sent[n]
+                elif inside:
+                    mention_buf += sent[n]
+                else:
+                    # non-linked words
+                    new_sent += sent[n]
+        return new_sent, log_probs
+
     def initialize_buffer(self, table_name, sent, pos_tag, raw_sent):
         # This function first constructs a masked sentence based on the linked entities. Then, it finds the
         # unlinked numbers and creates count and compare feature vectors for each such number. It reaches a
@@ -1381,29 +1554,8 @@ class Parser(object):
         t = self.get_table(table_name)
         cols = t.columns
 
-        def get_col_types():
-            col2type = {}
-            for i, col in enumerate(t.columns):
-                if isnumber(t[col].dtype):
-                    col2type[i] = 'num'
-                    continue
-                col_series = t[col].astype('str')
-                pats = col_series.str.extract(pat_add, expand=False)
-                if pats.isnull().all():
-                    pats = col_series.str.extract(pat_num, expand=False)
-                if not pats.isnull().all():
-                    col2type[i] = 'num'
-                    continue
-                date_pats = col_series.str.extract(pat_month, expand=False)
-                if not date_pats.isnull().all():
-                    col2type[i] = 'date'
-                    continue
-                col2type[i] = 'str'
-
-            return col2type
-
         # mapping = {i: "num" if isnumber(t) else "str" for i, t in enumerate(t.dtypes)}
-        mapping = get_col_types()
+        mapping = get_col_types(t)
 
         count += 1
         inside = False
@@ -1813,6 +1965,73 @@ class Parser(object):
 
         return len(c), result, masked_sent, mapping
 
+    def train_entity_linker(self, data=None):
+        if data is None:
+            with open('data/l2t/train_el.json', 'r') as f:
+                data = json.load(f)
+
+        def get_old_val(_x):
+            return 'tmp_input' if _x == 'msk_input' else _x[4:]
+
+        def remove_h(_p, _mem):
+            new_mem = []
+            for __p in _mem:
+                if _p == __p:
+                    continue
+                new_mem.append(__p)
+            return new_mem
+
+        total_covered = 0
+        for table_name, og_sent, logic_json, action in tqdm(data):
+            sent, pos_tags = self.normalize(og_sent)
+            raw_sent = " ".join(sent)
+            linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
+            sent, log_probs = self.new_entity_link(table_name, linked_sent, pos)
+            ret_val = self.initialize_buffer(table_name, linked_sent, pos, raw_sent)
+            masked_sent, mem_str, mem_num, mem_date, head_str, head_num, head_date, non_linked_num, mapping = ret_val
+
+            masked_val = None
+            if action in ['comparative', 'majority']:
+                masked_val = self.mask_highest_lo_entity_1(mem_num, mem_str, non_linked_num, logic_json)
+            if masked_val is None:
+                masked_val = self.mask_highest_lo_entity_2(mem_num, mem_str, non_linked_num, logic_json)
+            if masked_val is None:
+                continue
+
+            og_val = (get_old_val(masked_val[0]), masked_val[1])
+            mem_str, mem_num, mem_date = (
+                remove_h(og_val, mem_str), remove_h(og_val, mem_num), remove_h(og_val, mem_date))
+            result = self.run(table_name, raw_sent, masked_sent, pos, mem_str, mem_num,
+                              mem_date, head_str, head_num, head_date, masked_val)
+
+            c = list(set(result))
+            result = [x for x in c if '/True' in x]
+            rewards = [0] * len(log_probs)
+            if len(result) > 0:
+                rewards[-1] = 1
+                total_covered += 1
+
+            if self.optimizer is None:
+                self.optimizer = optim.Adam(list(self.model1.parameters()) + list(self.model2.parameters()), lr=1e-4)
+            R = 0
+            policy_loss = []
+            returns = []
+            eps = np.finfo(np.float32).eps.item()
+            for r in rewards[::-1]:
+                R = r + 1 * R
+                returns.insert(0, R)
+            returns = torch.FloatTensor(returns)
+            returns = (returns - returns.mean()) / (returns.std(unbiased=False) + eps)
+            for log_prob, R in zip(log_probs, returns):
+                policy_loss.append(-log_prob * R)
+
+            self.optimizer.zero_grad()
+            policy_loss = torch.stack(policy_loss).sum()
+            policy_loss.backward()
+            self.optimizer.step()
+        print(f"Total covered: {total_covered}")
+        return
+
     def hash_string(self, string):
         import hashlib
         sha = hashlib.sha256()
@@ -1868,7 +2087,7 @@ class Parser(object):
             with open('tmp/results/{}.json'.format(formatted_sent), 'w') as f:
                 json.dump((inputs[0], inputs[1], masked_val, len(c), result), f, indent=2)
 
-            return inputs[0], inputs[1], mem_num, len(c), result
+            return inputs[0], inputs[1], masked_val, len(c), result
         else:
             with open('tmp/results/{}.json'.format(formatted_sent), 'r') as f:
                 data = json.load(f)
@@ -1915,6 +2134,8 @@ def test_1():
     #                "the match on 16 march 2008 had the highest attendance of all the matches ."))
 
     # To try out
+    print(parse_it("1-14363116-1.html.csv",
+                   "the average height of players in vc zenit - kazan team is 199 cm ."))
 
     # No programs
     ## reason: Entity linker is not able to link the word "resignation" to the entity "resigned march 4 , 1894"
@@ -2022,6 +2243,51 @@ def generate_programs():
     return
 
 
+def create_train_data():
+    with open('data/programs.json', 'r') as f:
+        data = json.load(f)
+
+    def get_sent2logic():
+        with open('data/l2t/all_data.json') as f:
+            data = json.load(f)
+        ret_dict = {}
+        for ent in tqdm(data):
+            ret_dict[ent['sent']] = ent['logic'], ent['action']
+        return ret_dict
+
+    sent2logic = get_sent2logic()
+    # TODO: Fix masked value
+    all_uncovered_sents = []
+    for entry in tqdm(data):
+        if entry is None:
+            continue
+        if len(entry[-1]) == 0:
+            table_name, sent = entry[0], entry[1]
+            logic_json, action = sent2logic[sent]
+            all_uncovered_sents.append((table_name, sent, logic_json, action))
+
+    sampled_sents_idx = np.random.choice(len(all_uncovered_sents), 60)
+    sampled_sents = [all_uncovered_sents[i] for i in sampled_sents_idx]
+    with open('data/l2t/train_el.json', 'w') as f:
+        json.dump(sampled_sents, f, indent=2)
+    return
+
+
+def train_el(num_episodes):
+    with open('data/l2t/train_el.json', 'r') as f:
+        data = json.load(f)
+    parser = Parser("data/all_csv")
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', FutureWarning)
+        for i in range(num_episodes):
+            random.shuffle(data)
+            parser.train_entity_linker(data)
+    return
+
+
 if __name__ == "__main__":
-    test_3(6127)
+    # test_1()
+    # test_3(6127)
     # generate_programs()
+    # create_train_data()
+    train_el(1000)
