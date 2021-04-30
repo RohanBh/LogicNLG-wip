@@ -296,49 +296,6 @@ class Node(object):
             return self.delete_memory_date(self.memory_date.index((h, va)))
         return
 
-    def check(self, *args):
-        final = {}
-        for arg in args:
-            if arg == 'row':
-                continue
-
-            if arg == ['header_str', 'string']:
-                if any([k is not None for k, v in self.memory_str]):
-                    continue
-                else:
-                    return False
-
-            if arg == ['header_num', 'number']:
-                if any([k is not None for k, v in self.memory_num]):
-                    continue
-                else:
-                    return False
-
-            if arg == 'string':
-                if len(self.memory_str) > 0:
-                    continue
-                else:
-                    return False
-
-            if arg == 'number':
-                if len(self.memory_num) > 0:
-                    continue
-                else:
-                    return False
-
-            if arg == 'header_str':
-                if len(self.header_str) > 0:
-                    continue
-                else:
-                    return False
-
-            if arg == 'header_num':
-                if len(self.header_num) > 0:
-                    continue
-                else:
-                    return False
-        return True
-
 
 class FailedCommand:
     def __init__(self, message):
@@ -433,7 +390,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
             for k, v in APIs.items():
 
                 # propose candidates
-                if k in root.must_not_have or not root.check(*v['argument']):
+                if k in root.must_not_have:
                     continue
 
                 if v['output'] == 'row' and root.row_num >= 2:
@@ -604,10 +561,11 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                                 if returned[ix] is None:
                                                     continue
                                                 for ret_val in returned[ix]:
-                                                    tmp.append_result(
+                                                    tmp_new = copy.deepcopy(tmp)
+                                                    tmp_new.append_result(
                                                         command,
                                                         f'{ret_val}/' + str(f'{obj_compare(masked_val[1], ret_val)}'))
-                                                    finished.append((tmp, ret_val))
+                                                    finished.append((tmp_new, ret_val))
                                             else:
                                                 continue
                                     else:
@@ -662,10 +620,11 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                 elif v['output'] == 'list_str':
                                     if tmp.done():
                                         for ret_val in returned:
-                                            tmp.append_result(
+                                            tmp_new = copy.deepcopy(tmp)
+                                            tmp_new.append_result(
                                                 command,
                                                 f'{ret_val}/' + str(f'{obj_compare(masked_val[1], ret_val)}'))
-                                            finished.append((tmp, ret_val))
+                                            finished.append((tmp_new, ret_val))
                                 else:
                                     raise ValueError("error, output of scope")
 
@@ -804,6 +763,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
 
                 # greater_str_inv, less_str_inv
                 elif v['argument'] == ['row', 'header_str', 'str', 'header']:
+                    # TODO: Refactor. Change the signature to header_any instead of header_str
                     for j, (row_h, row) in enumerate(root.rows):
                         # It does not make sense to do greater_inv, less_inv operation on one row
                         if len(row) == 1:
@@ -824,10 +784,11 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                     if v['output'] == 'list_str':
                                         if tmp.done():
                                             for ret_val in returned:
-                                                tmp.append_result(
+                                                tmp_new = copy.deepcopy(tmp)
+                                                tmp_new.append_result(
                                                     command,
                                                     f'{ret_val}/' + str(f'{obj_compare(masked_val[1], ret_val)}'))
-                                                finished.append((tmp, ret_val))
+                                                finished.append((tmp_new, ret_val))
                                     else:
                                         raise ValueError('error, output of scope')
 
@@ -1848,6 +1809,8 @@ class Parser(object):
             for k, v in all_entities:
                 if obj_compare(a, v, round=True, type="eq"):
                     return k, v
+                if type(v) in [int, float] and obj_compare(a, -v, round=True, type="eq"):
+                    return k, v
             return None
 
         def get_new_header(ent):
@@ -1924,7 +1887,10 @@ class Parser(object):
         linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
         # mem_str, mem_num, mem_date, head_str, head_num, head_date,
         ret_val = self.initialize_buffer(table_name, linked_sent, pos, raw_sent)
-        masked_sent, mem_str, mem_num, mem_date, head_str, head_num, head_date, non_linked_num, mapping = ret_val
+        # masked_sent, mem_str, mem_num, mem_date, head_str, head_num, head_date, non_linked_num, mapping = ret_val
+        masked_sent, mem_str, mem_num, mem_date, _, _, _, non_linked_num, mapping = ret_val
+        head_num, head_str, head_date = self.get_headers(table_name)
+
         # memory_num and memory_str are (hdr, val) tuples which serve as arguments for the programs of type num and str
         # resp. Whereas, header_num and header_str are useful for arguments of type header_num and header_str resp.
         # if len(mem_num) + len(non_linked_num) == 0:
@@ -1950,12 +1916,15 @@ class Parser(object):
             return new_mem
 
         og_val = (get_old_val(masked_val[0]), masked_val[1])
-        mem_str, mem_num, mem_date = remove_h(og_val, mem_str), remove_h(og_val, mem_num), remove_h(og_val, mem_date)
+        mem_str, mem_num, mem_date = (
+            remove_h(og_val, mem_str), remove_h(og_val, mem_num), remove_h(og_val, mem_date))
 
         if debug:
-            print(f"Input to dynmiac programmer:\nog_sent: {og_sent}"
-                  f"\nmasked: {masked_sent}\nmem_str, mem_num, mem_date: {mem_str, mem_num, mem_date}"
-                  f"\nhead_str, head_num, head_date: {head_str, head_num, head_date}, masked_val: {masked_val}")
+            print(f"\nInput to dynmiac programmer:\nog_sent: {og_sent}"
+                  f"\nlinked: {linked_sent}\nmasked: {masked_sent}\nmapping: {mapping}"
+                  f"\nmem_str, mem_num, mem_date: {mem_str, mem_num, mem_date}"
+                  f"\nhead_str, head_num, head_date: {head_str, head_num, head_date}"
+                  f"\nmasked_val: {masked_val}\n")
 
         result = self.run(table_name, raw_sent, masked_sent, pos, mem_str, mem_num,
                           mem_date, head_str, head_num, head_date, masked_val)
@@ -2038,12 +2007,27 @@ class Parser(object):
         sha.update(string.encode())
         return sha.hexdigest()[:16]
 
+    def get_headers(self, table_name):
+        t = self.get_table(table_name)
+        mapping = get_col_types(t)
+        head_str, head_num, head_date = [[] for _ in range(3)]
+        for i, col in enumerate(t.columns):
+            if mapping[i] == 'num':
+                head_num.append(col)
+            elif mapping[i] == 'date':
+                head_date.append(col)
+            elif mapping[i] == 'str':
+                head_str.append(col)
+        return head_num, head_str, head_date
+
     def distribute_parse(self, inputs):
         table_name, sent, logic_json, action = inputs
+        # Get filename for caching
         formatted_sent = re.sub(r"[^\w\s]", '', sent)
         formatted_sent = re.sub(r"\s+", '-', formatted_sent)
         if len(formatted_sent) > 100:
             formatted_sent = formatted_sent[-100:]
+
         if not os.path.exists('tmp/results/{}.json'.format(formatted_sent)):
             sent, pos_tags = self.normalize(sent)
             raw_sent = " ".join(sent)
@@ -2053,7 +2037,8 @@ class Parser(object):
                 return None
             # mem_str, mem_num, mem_date, head_str, head_num, head_date,
             ret_val = self.initialize_buffer(table_name, linked_sent, pos, raw_sent)
-            masked_sent, mem_str, mem_num, mem_date, head_str, head_num, head_date, non_linked_num, mapping = ret_val
+            masked_sent, mem_str, mem_num, mem_date, _, _, _, non_linked_num, mapping = ret_val
+            head_str, head_num, head_date = self.get_headers(table_name)
 
             masked_val = None
             if action in ['comparative', 'majority']:
@@ -2084,10 +2069,12 @@ class Parser(object):
             c = list(set(result))
             result = [x for x in c if '/True' in x]
 
-            with open('tmp/results/{}.json'.format(formatted_sent), 'w') as f:
-                json.dump((inputs[0], inputs[1], masked_val, len(c), result), f, indent=2)
+            ret_val = inputs[0], inputs[1], linked_sent, masked_val, len(c), result
 
-            return inputs[0], inputs[1], masked_val, len(c), result
+            with open('tmp/results/{}.json'.format(formatted_sent), 'w') as f:
+                json.dump(ret_val, f, indent=2)
+
+            return ret_val
         else:
             with open('tmp/results/{}.json'.format(formatted_sent), 'r') as f:
                 data = json.load(f)
@@ -2123,8 +2110,11 @@ def test_1():
     # print(parse_it("2-13014020-6.html.csv",
     #                "philipp petzschner partnered with j\u00fcrgen melzer "
     #                "for the majority of his tennis doubles tournaments ."))
-    # print(parse_it("2-17443121-2.html.csv",
-    #                "the episode entitled gary marries off his ex aired seven days after gary gets boundaries ."))
+    print(parse_it("2-17443121-2.html.csv",
+                   "the episode entitled gary marries off his ex aired seven days after gary gets boundaries ."))
+    # print(parse_it("1-1342233-3.html.csv",
+    #                "in the election of 1946 for united states house of representatives ,"
+    #                " the incumbent who was first elected the second earliest was frank w boykin ."))
 
     # Warning about regex
     # parse_it("2-12326046-2.html.csv",
@@ -2134,8 +2124,9 @@ def test_1():
     #                "the match on 16 march 2008 had the highest attendance of all the matches ."))
 
     # To try out
-    print(parse_it("1-14363116-1.html.csv",
-                   "the average height of players in vc zenit - kazan team is 199 cm ."))
+    # Something is wrong in this one. Debug this
+    print(parse_it("1-24538587-11.html.csv",
+                   "the core i3 - 32xx brand name processor has the second highest tdp of intel core processors ."))
 
     # No programs
     ## reason: Entity linker is not able to link the word "resignation" to the entity "resigned march 4 , 1894"
@@ -2162,12 +2153,40 @@ def test_1():
     #                "for the united states house of representatives election in 2000 ,"
     #                " of the incumbents that were re-elected , the one with the 2nd most "
     #                "recent first election date was from ohio district 10 ."))
+    ## reason: 11 years is not mapped to the column 'from' where column from contains years
+    # print(parse_it("2-11482079-2.html.csv",
+    #                "alvan adams began playing for the phoenix suns 11 years before rafael addison ."))
 
     # Wrong program
     ## reason: 15 days is not linked to the column "date"
     # print(parse_it("2-1140080-2.html.csv",
     #                "in the 1979 formula one season , "
     #                "the german grand prix was 15 days after the british grand prix ."))
+    ## reason: april is masked and all_eq_inv doesn't return max common substr. Moreover, col date is not of date type
+    ## and therefore, all_eq_inv (num type) will be called and all dates are not equal. Just the month is equal.
+    # print(parse_it("1-17311759-9.html.csv",
+    #                "all games of the atlanta hawks ' in the 2008 - 09 season were played in the month of april ."))
+
+    # No masking
+    ## reason: 1970s was not linked to the column date of birth (of format 07.09.1970) and it was the only entity
+    # print(parse_it("2-15859432-3.html.csv",
+    #                "most of the men 's volleyball players at the 2004 summer olympics were born in to 1970s ."))
+    ## reason: The masked value should be "won" as there is a column named "result" in the table with values like
+    ## 'won 4 - 0'. The generated program would be most_eq_inv { all_rows ; result } = won/True
+    # print(parse_it("2-15213262-10.html.csv",
+    #                "the flames won most of their games during the 07-08 season ."))
+    ## reason: George h. Christopher was transformed to george christopher before entity linking. Even though, it was
+    ## linked correctly, we were not able to see that the linked entity "george christopher" appears in the logic form
+    ## eq { hop { nth_argmin { all_rows ; reason for change ; 1 } ; vacator } ; george h christopher ( d ) } = true
+    # print(parse_it("1-2159571-2.html.csv",
+    #                "the first us representative in the 86th us congress to be replaced was george h. christopher ."))
+    ## reason: All entities are linked but there is no mention of entities like new york and beneath vesuvius
+    ## in the sentence.
+    ## less { hop { filter_eq { all_rows ; episode title ; new york } ; original airdate } ;
+    ## hop { filter_eq { all_rows ; episode title ; beneath vesuvius } ; original airdate } } = true
+    # print(parse_it("2-10926568-1.html.csv",
+    #                "in june 2007 , eric geller hosted an episode of \" cities "
+    #                "of the underworld \" before don wildman did ."))
     return
 
 
@@ -2243,28 +2262,66 @@ def generate_programs():
     return
 
 
+def sample_unmasked_sents():
+    with open('data/programs.json', 'r') as f:
+        data = json.load(f)
+
+    def get_metadata():
+        with open('data/l2t/train.json') as f:
+            data = json.load(f)
+        ret_dict = {}
+        ret_dict_2 = {}
+        for ent in tqdm(data):
+            tname = ent['url'][ent['url'].find('all_csv/') + 8:]
+            ret_dict[ent['sent']] = tname, ent['logic'], ent['action']
+            ret_dict_2[ent['sent']] = 0
+        return ret_dict, ret_dict_2
+
+    sent2logic, sent2covered = get_metadata()
+
+    for entry in tqdm(data):
+        if entry is None:
+            continue
+        sent = entry[1]
+        sent2covered[sent] += 1
+    print("Multiple sents:", len([v for v in sent2covered.values() if v > 1]))
+    print([k for k, v in sent2covered.items() if v > 1])
+
+    all_uncovered_sents = []
+    for sent in tqdm(sent2covered):
+        if sent2covered[sent] > 0:
+            continue
+        table_name, logic_json, action = sent2logic[sent]
+        all_uncovered_sents.append((table_name, sent, logic_json, action))
+
+    sampled_sents_idx = np.random.choice(len(all_uncovered_sents), 60)
+    sampled_sents = [all_uncovered_sents[i] for i in sampled_sents_idx]
+    with open('data/l2t/sampled_unmasked_sents.json', 'w') as f:
+        json.dump(sampled_sents, f, indent=2)
+    return
+
+
 def create_train_data():
     with open('data/programs.json', 'r') as f:
         data = json.load(f)
 
-    def get_sent2logic():
-        with open('data/l2t/all_data.json') as f:
+    def get_metadata():
+        with open('data/l2t/train.json') as f:
             data = json.load(f)
         ret_dict = {}
         for ent in tqdm(data):
             ret_dict[ent['sent']] = ent['logic'], ent['action']
         return ret_dict
 
-    sent2logic = get_sent2logic()
-    # TODO: Fix masked value
+    sent2logic = get_metadata()
+
     all_uncovered_sents = []
     for entry in tqdm(data):
-        if entry is None:
+        if entry is None or len(entry[-1]) > 0:
             continue
-        if len(entry[-1]) == 0:
-            table_name, sent = entry[0], entry[1]
-            logic_json, action = sent2logic[sent]
-            all_uncovered_sents.append((table_name, sent, logic_json, action))
+        table_name, sent = entry[0], entry[1]
+        logic_json, action = sent2logic[sent]
+        all_uncovered_sents.append((table_name, sent, logic_json, action))
 
     sampled_sents_idx = np.random.choice(len(all_uncovered_sents), 60)
     sampled_sents = [all_uncovered_sents[i] for i in sampled_sents_idx]
@@ -2286,8 +2343,9 @@ def train_el(num_episodes):
 
 
 if __name__ == "__main__":
-    # test_1()
+    test_1()
     # test_3(6127)
     # generate_programs()
+    # sample_unmasked_sents()
     # create_train_data()
-    train_el(1000)
+    # train_el(1000)
