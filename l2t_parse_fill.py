@@ -2069,7 +2069,7 @@ class Parser(object):
             c = list(set(result))
             result = [x for x in c if '/True' in x]
 
-            ret_val = inputs[0], inputs[1], linked_sent, masked_val, len(c), result
+            ret_val = inputs[0], inputs[1], linked_sent, masked_val, mem_num, mem_str, mem_date, len(c), result
 
             with open('tmp/results/{}.json'.format(formatted_sent), 'w') as f:
                 json.dump(ret_val, f, indent=2)
@@ -2343,9 +2343,9 @@ def train_el(num_episodes):
 
 
 if __name__ == "__main__":
-    test_1()
+    # test_1()
     # test_3(6127)
-    # generate_programs()
+    generate_programs()
     # sample_unmasked_sents()
     # create_train_data()
     # train_el(1000)
