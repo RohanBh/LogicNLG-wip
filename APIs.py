@@ -1,10 +1,8 @@
-import numpy
-
 APIs = {}
 
 # With only one argument
 APIs['count'] = {"argument": ['row'], 'output': 'num',
-                 'function': lambda t:  len(t),
+                 'function': lambda t: len(t),
                  'tostr': lambda t: "count{{{}}}".format(t),
                  'append': True}
 
@@ -29,17 +27,20 @@ APIs['inc_str'] = {"argument": ['str'], 'output': 'str',
                    'append': False}
 
 APIs['all_exist'] = {"argument": ['strs'], 'output': 'bool',
-                   "function": lambda t: True,
-                   "tostr": lambda t: array_to_exist(t),
-                   'append': True}
+                     "function": lambda t: True,
+                     "tostr": lambda t: array_to_exist(t),
+                     'append': True}
+
 
 def array_to_exist(t):
-  output = 'exist{'
-  for _ in t:
-    output += _ + '; '
-  output = output[:-2]
-  output += '}'
-  return output
+    output = 'exist{'
+    for _ in t:
+        output += _ + '; '
+    output = output[:-2]
+    output += '}'
+    return output
+
+
 """
 APIs['within_s_s'] = {"argument": ['row', 'header_str', 'str'], 'output': 'bool',
                       "function": lambda t, col, value: len(fuzzy_match(t, col, value)) > 0,
@@ -174,17 +175,17 @@ APIs['argmax'] = {"argument": ['row', 'header_num'], 'output': 'row',
                   'append': False}
 
 APIs['argmin'] = {"argument": ['row', 'header_num'], 'output': 'row',
-                  'function': lambda t, col:  t[t[col].values == t[col].values.min()],
+                  'function': lambda t, col: t[t[col].values == t[col].values.min()],
                   'tostr': lambda t, col: "argmin{{{}; {}}}".format(t, col),
                   'append': False}
 
 APIs['str_hop'] = {"argument": ['row', 'header_str'], 'output': 'str',
-                   'function': lambda t, col:  t[col].values[0],
+                   'function': lambda t, col: t[col].values[0],
                    'tostr': lambda t, col: "hop{{{}; {}}}".format(t, col),
                    'append': True}
 
 APIs['num_hop'] = {"argument": ['row', 'header_num'], 'output': 'num',
-                   'function': lambda t, col:  t[col].values[0],
+                   'function': lambda t, col: t[col].values[0],
                    'tostr': lambda t, col: "hop{{{}; {}}}".format(t, col),
                    'append': True}
 
@@ -194,12 +195,12 @@ APIs['most_freq'] = {"argument": ['row', 'header_str'], 'output': 'str',
                      'append': True}
 
 APIs['half'] = {"argument": ['row'], 'output': 'num',
-                'function': lambda t:  int(len(t) // 2),
+                'function': lambda t: int(len(t) // 2),
                 'tostr': lambda t: "half{{{}}}".format(t),
                 'append': True}
 
 APIs['one_third'] = {"argument": ['row'], 'output': 'num',
-                     'function': lambda t:  int(len(t) // 3),
+                     'function': lambda t: int(len(t) // 3),
                      'tostr': lambda t: "one_third{{{}}}".format(t),
                      'append': True}
 
@@ -215,32 +216,32 @@ APIs['add'] = {"argument": ['num', 'num'], 'output': 'num',
                'append': True}
 
 APIs['greater'] = {"argument": ['num', 'num'], 'output': 'bool',
-                   'function': lambda t1, t2:  t1 > t2,
+                   'function': lambda t1, t2: t1 > t2,
                    'tostr': lambda t1, t2: "greater{{{}; {}}}".format(t1, t2),
                    'append': False}
 
 APIs['eq'] = {"argument": ['num', 'num'], 'output': 'bool',
-              'function': lambda t1, t2:  t1 == t2,
+              'function': lambda t1, t2: t1 == t2,
               'tostr': lambda t1, t2: "eq{{{}; {}}}".format(t1, t2),
               'append': None}
 
 APIs['str_eq'] = {"argument": ['str', 'str'], 'output': 'bool',
-                  'function': lambda t1, t2:  t1 in t2 or t2 in t1,
+                  'function': lambda t1, t2: t1 in t2 or t2 in t1,
                   'tostr': lambda t1, t2: "eq{{{}; {}}}".format(t1, t2),
                   "append": None}
 
 APIs['not_eq'] = {"argument": ['num', 'num'], 'output': 'bool',
-                  'function': lambda t1, t2:  t1 != t2,
+                  'function': lambda t1, t2: t1 != t2,
                   'tostr': lambda t1, t2: "not_eq{{{}; {}}}".format(t1, t2),
                   "append": None}
 
 APIs['not_str_eq'] = {"argument": ['str', 'str'], 'output': 'bool',
-                      'function': lambda t1, t2:  t1 not in t2 and t2 not in t1,
+                      'function': lambda t1, t2: t1 not in t2 and t2 not in t1,
                       'tostr': lambda t1, t2: "not_eq{{{}; {}}}".format(t1, t2),
                       "append": None}
 
 APIs['and'] = {"argument": ['bool', 'bool'], 'output': 'bool',
-               'function': lambda t1, t2:  t1 and t2,
+               'function': lambda t1, t2: t1 and t2,
                'tostr': lambda t1, t2: "and{{{}; {}}}".format(t1, t2),
                "append": None}
 
@@ -254,7 +255,6 @@ APIs["filter_str_not_eq"] = {"argument": ['row', ['header_str', 'str']], "output
                              "function": lambda t, col, value: fuzzy_match(t, col, value, negate=True),
                              "tostr": lambda t, col, value: "filter_not_eq{{{}; {}; {}}}".format(t, col, value),
                              'append': False}
-
 
 APIs["filter_eq"] = {"argument": ['row', ['header_num', 'num']], "output": "row",
                      "function": lambda t, col, value: t[t[col] == value],
@@ -295,7 +295,6 @@ APIs["all_str_not_eq"] = {"argument": ['row', ['header_str', 'str']], "output": 
                           "function": lambda t, col, value: 0 == len(fuzzy_match(t, col, value)),
                           "tostr": lambda t, col, value: "all_not_eq{{{}; {}; {}}}".format(t, col, value),
                           "append": None}
-
 
 APIs["all_eq"] = {"argument": ['row', ['header_num', 'num']], "output": "bool",
                   "function": lambda t, col, value: len(t) == len(t[t[col] == value]),
@@ -344,79 +343,80 @@ APIs['samerow_str'] = {"argument": [['header_str', 'str'], ['header_str', 'str']
                        "append": None}
 """
 all_funcs = ['count', 'none', 'only', 'after', 'zero', 'before', 'top', 'bottom',
-            'first', 'second', 'third', 'fourth', 'fifth', 'last', 'uniq',
-            'avg', 'sum', 'max', 'mean', 'argmax', 'argmin', 'hop', 'most_freq',
-            'half', 'one_third', 'diff', 'add', 'greater', 'eq', 'not_eq',
-            'and', 'filter_eq', 'filter_not_eq', 'filter_less', 'filter_greater',
-            'filter_greater_eq', 'filter_less_eq', 'all_eq', 'all_not_eq', 'all_less',
-            'all_less_eq', 'all_greater', 'all_greater_eq', 'exist']
+             'first', 'second', 'third', 'fourth', 'fifth', 'last', 'uniq',
+             'avg', 'sum', 'max', 'mean', 'argmax', 'argmin', 'hop', 'most_freq',
+             'half', 'one_third', 'diff', 'add', 'greater', 'eq', 'not_eq',
+             'and', 'filter_eq', 'filter_not_eq', 'filter_less', 'filter_greater',
+             'filter_greater_eq', 'filter_less_eq', 'all_eq', 'all_not_eq', 'all_less',
+             'all_less_eq', 'all_greater', 'all_greater_eq', 'exist']
 
 
 def is_ascii(s):
-  return all(ord(c) < 128 for c in s)
+    return all(ord(c) < 128 for c in s)
 
 
 def fuzzy_match(t, col, val, negate=False):
-  if not is_ascii(val):
-    return t[t[col].str.contains(val, regex=False, na=False)]
-  else:
-    try:
-      # Try using regular expression
-      reg_val = ["(?=.*{})".format(_) for _ in val.split(' ')]
-      reg_val = "".join(reg_val)
-      if negate:
-        returned = t[~t[col].str.contains(reg_val, regex=True, na=False)]
-      else:
-        returned = t[t[col].str.contains(reg_val, regex=True, na=False)]
-      return returned
-    except Exception:
-      # Backoff to full string matching
-      return t[t[col].str.contains(val, regex=False, na=False)]
+    if not is_ascii(val):
+        return t[t[col].str.contains(val, regex=False, na=False)]
+    else:
+        try:
+            # Try using regular expression
+            reg_val = ["(?=.*{})".format(_) for _ in val.split(' ')]
+            reg_val = "".join(reg_val)
+            if negate:
+                returned = t[~t[col].str.contains(reg_val, regex=True, na=False)]
+            else:
+                returned = t[t[col].str.contains(reg_val, regex=True, na=False)]
+            return returned
+        except Exception:
+            # Backoff to full string matching
+            return t[t[col].str.contains(val, regex=False, na=False)]
 
 
 def none(t):
-  if 'none' in t or 'n / a' in t or 'no information' in t or t == '-' or t == 'no':
-    return True
-  else:
-    return False
+    if 'none' in t or 'n / a' in t or 'no information' in t or t == '-' or t == 'no':
+        return True
+    else:
+        return False
 
 
 def inner(t, t1):
-  if len(t) == 1:
-    t, t1 = t1, t
-  col1, col2, col3, col4 = t.columns[0], t.columns[1], t.columns[2], t.columns[3]
-  val1, val2, val3, val4 = t1[col1].values[0], t1[col2].values[0],  t1[col3].values[0], t1[col4].values[0]
-  idx = t.loc[(t[col1] == val1) & (t[col2] == val2) & (t[col3] == val3) & (t[col4] == val4)].index
-  if len(idx) > 0:
-    return idx[0].item()
-  else:
-    return None
+    if len(t) == 1:
+        t, t1 = t1, t
+    col1, col2, col3, col4 = t.columns[0], t.columns[1], t.columns[2], t.columns[3]
+    val1, val2, val3, val4 = t1[col1].values[0], t1[col2].values[0], t1[col3].values[0], t1[col4].values[0]
+    idx = t.loc[(t[col1] == val1) & (t[col2] == val2) & (t[col3] == val3) & (t[col4] == val4)].index
+    if len(idx) > 0:
+        return idx[0].item()
+    else:
+        return None
 
 
 def n_th(t, t1, num):
-  tmp = inner(t, t1)
-  if tmp is None:
-    return None
-  else:
-    return tmp == num
+    tmp = inner(t, t1)
+    if tmp is None:
+        return None
+    else:
+        return tmp == num
 
 
 def row_select(t, t1, bias):
-  col1, col2, col3, col4 = t.columns[0], t.columns[1], t.columns[2], t.columns[3]
-  val1, val2, val3, val4 = t1[col1].values[0], t1[col2].values[0],  t1[col3].values[0], t1[col4].values[0]
-  idx = t.loc[(t[col1] == val1) & (t[col2] == val2) & (t[col3] == val3) & (t[col4] == val4)].index + bias
-  if idx[0] < len(t) and idx[0] >= 0:
-    return t.loc[idx]
-  else:
-    return None
+    col1, col2, col3, col4 = t.columns[0], t.columns[1], t.columns[2], t.columns[3]
+    val1, val2, val3, val4 = t1[col1].values[0], t1[col2].values[0], t1[col3].values[0], t1[col4].values[0]
+    idx = t.loc[(t[col1] == val1) & (t[col2] == val2) & (t[col3] == val3) & (t[col4] == val4)].index + bias
+    if idx[0] < len(t) and idx[0] >= 0:
+        return t.loc[idx]
+    else:
+        return None
 
 
 def most_freq(t, col):
-  value_counts = t[col].value_counts()
-  if value_counts.max() == 1:
-    return None
-  else:
-    return value_counts.idxmax()
+    value_counts = t[col].value_counts()
+    if value_counts.max() == 1:
+        return None
+    else:
+        return value_counts.idxmax()
+
 
 triggers = {}
 non_triggers = {}
@@ -460,7 +460,7 @@ non_triggers['fifth'] = ['fifth', '5th']
 non_triggers['last'] = ['last', 'bottom', 'latest', 'most']
 
 non_triggers["filter_greater"] = ['RBR', 'JJR', 'more', 'than', 'above', 'after', 'through', 'to']
-non_triggers["filter_less"] = ['RBR', 'JJR', 'less', 'than', 'below', 'under', 'through', 'to']
+non_triggers["filter_less"] = ['RBR', 'JJR', 'less', 'than', 'below', 'under', 'before', 'through', 'to']
 non_triggers['less'] = ['RBR', 'JJR', 'less', 'than', 'below', 'under']
 non_triggers['greater'] = ['RBR', 'JJR', 'more', 'than', 'above', 'after', 'exceed', 'over']
 
@@ -470,7 +470,8 @@ non_triggers['all_greater'] = [['all', 'every', 'each'], [
     'RBR', 'JJR', 'more', 'than', 'above', 'after', 'exceed', 'over']]
 non_triggers['all_str_eq'] = ['all', 'every', 'each', 'always']
 
-non_triggers["all_str_not_eq"] = [['all', 'every', 'each', 'always'], ['not', 'no', 'never', "didn't", "won't", "wasn't"]]
+non_triggers["all_str_not_eq"] = [['all', 'every', 'each', 'always'],
+                                  ['not', 'no', 'never', "didn't", "won't", "wasn't"]]
 non_triggers["all_not_eq"] = non_triggers["all_str_not_eq"]
 
 non_triggers['filter_less_eq'] = ['at most']
@@ -503,10 +504,28 @@ non_triggers['fourth'] = ['fourth', '4th']
 non_triggers['fifth'] = ['fifth', '5th']
 non_triggers['last'] = ['last', 'bottom']
 non_triggers['all_exist'] = ['all', 'both', 'and', 'while']
-#non_triggers['istype_s_n'] = ['is', 'are', 'were', 'was', 'be', 'within', 'one', 'of']
-#non_triggers['istype_n_s'] = ['is', 'are', 'were', 'was', 'be', 'within', 'one', 'of']
-#non_triggers['count'] = ['there', 'num', 'amount', 'have', 'has', 'had', 'are', 'more']
-#non_triggers['max'] = [k for k, v in triggers.iteritems() if v == 'max']
-#non_triggers['argmax'] = [k for k, v in triggers.iteritems() if v == 'argmax']
-#non_triggers['and'] = ['and', 'while', 'when', ',', 'neither', 'none', 'all', 'both']
-#non_triggers['neither'] = ['neither', 'none', 'not', "'nt", 'both']
+# non_triggers['istype_s_n'] = ['is', 'are', 'were', 'was', 'be', 'within', 'one', 'of']
+# non_triggers['istype_n_s'] = ['is', 'are', 'were', 'was', 'be', 'within', 'one', 'of']
+# non_triggers['count'] = ['there', 'num', 'amount', 'have', 'has', 'had', 'are', 'more']
+# non_triggers['max'] = [k for k, v in triggers.iteritems() if v == 'max']
+# non_triggers['argmax'] = [k for k, v in triggers.iteritems() if v == 'argmax']
+# non_triggers['and'] = ['and', 'while', 'when', ',', 'neither', 'none', 'all', 'both']
+# non_triggers['neither'] = ['neither', 'none', 'not', "'nt", 'both']
+
+# Inverse non triggers
+non_triggers['greater_str_inv'] = non_triggers['greater']
+non_triggers['less_str_inv'] = non_triggers['less']
+
+non_triggers['most_eq_inv'] = ['most', 'majority']
+non_triggers['most_str_eq_inv'] = non_triggers['most_eq_inv']
+non_triggers['most_greater_inv'] = non_triggers['most_eq_inv']
+non_triggers['most_greater_eq_inv'] = [non_triggers['filter_greater_eq'], non_triggers['most_eq_inv']]
+non_triggers['most_less_inv'] = [non_triggers["filter_less"], non_triggers['most_eq_inv']]
+non_triggers['most_less_eq_inv'] = non_triggers['most_eq_inv']
+
+non_triggers['all_str_eq_inv'] = non_triggers['all_str_eq']
+non_triggers['all_greater_inv'] = non_triggers['all_greater']
+non_triggers['all_greater_eq_inv'] = non_triggers['all_greater_eq']
+non_triggers['all_less_inv'] = non_triggers['all_less']
+non_triggers['all_less_eq_inv'] = non_triggers['all_less_eq']
+non_triggers['all_eq_inv'] = non_triggers['all_eq']
