@@ -28,37 +28,84 @@ type2funcs = {'aggregation': {'avg', 'sum'},
               'unique': {'only'}
               }
 
+trigger_words_data = {'all_eq': {'_count': 41, 'all': 39},
+                      'all_greater': {'_count': 22, 'all': 18},
+                      'all_greater_eq': {'_count': 14, 'all': 13, 'at least': 10},
+                      'all_less': {'_count': 4, 'all': 4, 'under': 2},
+                      'all_less_eq': {'_count': 1},
+                      'all_not_eq': {'_count': 1},
+                      'all_str_eq': {'_count': 238, 'all': 218},
+                      'argmax': {'_count': 790, 'highest': 441, 'most': 182},
+                      'argmin': {'_count': 229, 'earliest': 49, 'highest': 28,
+                                 'lowest': 25, 'all': 25, 'least': 16, 'best': 15},
+                      'avg': {'_count': 811, 'average': 754},
+                      'count': {'_count': 1623, 'total': 214},
+                      'diff': {'_count': 104, 'before': 39},
+                      'greater': {'_count': 476, 'higher': 127},
+                      'less': {'_count': 366, 'earlier': 121, 'before': 116},
+                      'max': {'_count': 111, 'highest': 53},
+                      'min': {'_count': 43, 'earliest': 17},
+                      'most_eq': {'_count': 80, 'most': 45, 'majority': 27},
+                      'most_greater': {'_count': 151, 'most': 81, 'majority': 65},
+                      'most_greater_eq': {'_count': 55, 'least': 41, 'most': 30, 'majority': 24},
+                      'most_less': {'_count': 105, 'most': 69, 'majority': 34, 'under': 29, 'before': 19},
+                      'most_less_eq': {'_count': 7, 'majority': 4, 'most': 3},
+                      'most_not_eq': {'_count': 2, 'most': 2},
+                      'most_str_eq': {'_count': 750, 'most': 377, 'majority': 345},
+                      'most_str_not_eq': {'_count': 8, 'most': 5, 'majority': 3},
+                      'nth_argmax': {'_count': 553, 'highest': 359, '2nd': 165,
+                                     'second': 152, 'most': 59, 'third': 53,
+                                     'among': 50, 'last': 39, '3rd': 30, 'all': 29},
+                      'nth_argmin': {'_count': 365, 'second': 110, 'earliest': 102,
+                                     '2nd': 55, 'lowest': 44, 'third': 37},
+                      'nth_max': {'_count': 29, 'highest': 10, 'second': 8, 'third': 5, 'largest': 5, 'newest': 2},
+                      'nth_min': {'_count': 69, 'second': 10, '1st': 9, '3rd': 5, 'third': 4, 'fourth': 4, '2nd': 4},
+                      'only': {'_count': 1277},
+                      'sum': {'_count': 335, 'total': 284, 'combined': 54}
+                      }
+
+memory_arg_funcs = ('filter_str_eq', 'filter_str_not_eq', 'filter_eq', 'filter_not_eq', 'filter_less',
+                    'filter_greater', 'filter_greater_eq', 'filter_less_eq', 'greater_str_inv', 'less_str_inv')
+
 APIs = {}
 
 # With only one argument
 
 APIs['inc'] = {"argument": ['any'], 'output': 'any',
                "function": lambda t: t,
-               "tostr": lambda t: "inc{{ {} }}".format(t),
-               'append': False}
+               "tostr": lambda t: "inc {{ {} }}".format(t),
+               "tosstr": lambda t: "inc {{ {} }}".format(t),
+               'append': False,
+               'model_args': ['any']}
 
 APIs['dec'] = {"argument": ['any'], 'output': 'none',
                "function": lambda t: None,
-               "tostr": lambda t: "dec{{ {} }}".format(t),
-               'append': False}
+               "tostr": lambda t: "dec {{ {} }}".format(t),
+               "tosstr": lambda t: "dec {{ {} }}".format(t),
+               'append': False,
+               'model_args': ['any']}
 
 ### count
 APIs['count'] = {"argument": ['row'], 'output': 'num',
                  'function': lambda t: len(t),
                  'tostr': lambda t: "count {{ {} }}".format(t),
-                 'append': True}
+                 "tosstr": lambda t: "count {{ {} }}".format(t),
+                 'append': True,
+                 'model_args': ['row']}
 
 ### unique
-APIs['only'] = {"argument": ['row'], 'output': 'bool',
-                "function": lambda t: len(t) == 1,
-                "tostr": lambda t: "only {{ {} }}".format(t),
-                'append': None}
+# APIs['only'] = {"argument": ['row'], 'output': 'bool',
+#                 "function": lambda t: len(t) == 1,
+#                 "tostr": lambda t: "only {{ {} }}".format(t),
+#                 'append': None}
 
 # With only two argument and the first is row
 APIs['hop'] = {"argument": ['row', 'header'], 'output': 'obj',
                'function': lambda t, col: hop_op(t, col),
                'tostr': lambda t, col: "hop {{ {} ; {} }}".format(t, col),
-               'append': True}
+               'tosstr': lambda t, col: "hop {{ {} ; {} }}".format(t, col),
+               'append': True,
+               'model_args': ['row', 'header_any']}
 
 # APIs['num_hop'] = {"argument": ['row', 'header'], 'output': 'num',
 #                    'function': lambda t, col: hop_op(t, col),
@@ -68,144 +115,184 @@ APIs['hop'] = {"argument": ['row', 'header'], 'output': 'obj',
 APIs['avg'] = {"argument": ['row', 'header_num'], 'output': 'num',
                "function": lambda t, col: agg(t, col, "avg"),
                "tostr": lambda t, col: "avg {{ {} ; {} }}".format(t, col),
-               'append': True}
+               "tosstr": lambda t, col: "avg {{ {} ; {} }}".format(t, col),
+               'append': True,
+               'model_args': ['row', 'header_num']}
 
 APIs['sum'] = {"argument": ['row', 'header_num'], 'output': 'num',
                "function": lambda t, col: agg(t, col, "sum"),
                "tostr": lambda t, col: "sum {{ {} ; {} }}".format(t, col),
-               'append': True}
+               "tosstr": lambda t, col: "sum {{ {} ; {} }}".format(t, col),
+               'append': True,
+               'model_args': ['row', 'header_num']}
 
 APIs['max'] = {"argument": ['row', 'header'], 'output': 'obj',
                "function": lambda t, col: nth_maxmin(t, col, order=1, max_or_min="max", arg=False),
                "tostr": lambda t, col: "max {{ {} ; {} }}".format(t, col),
-               'append': True}
+               "tosstr": lambda t, col: "max {{ {} ; {} }}".format(t, col),
+               'append': True,
+               'model_args': ['row', 'header']}
 
 APIs['min'] = {"argument": ['row', 'header'], 'output': 'obj',
                "function": lambda t, col: nth_maxmin(t, col, order=1, max_or_min="min", arg=False),
                "tostr": lambda t, col: "min {{ {} ; {} }}".format(t, col),
-               'append': True}
+               "tosstr": lambda t, col: "min {{ {} ; {} }}".format(t, col),
+               'append': True,
+               'model_args': ['row', 'header']}
 
 APIs['argmax'] = {"argument": ['row', 'header'], 'output': 'row',
                   'function': lambda t, col: nth_maxmin(t, col, order=1, max_or_min="max", arg=True),
                   'tostr': lambda t, col: "argmax {{ {} ; {} }}".format(t, col),
-                  'append': False}
+                  'tosstr': lambda t, col: "argmax {{ {} ; {} }}".format(t, col),
+                  'append': False,
+                  'model_args': ['row', 'header']}
 
 APIs['argmin'] = {"argument": ['row', 'header'], 'output': 'row',
                   'function': lambda t, col: nth_maxmin(t, col, order=1, max_or_min="min", arg=True),
                   'tostr': lambda t, col: "argmin {{ {} ; {} }}".format(t, col),
-                  'append': False}
+                  'tosstr': lambda t, col: "argmin {{ {} ; {} }}".format(t, col),
+                  'append': False,
+                  'model_args': ['row', 'header']}
 
 # add for ordinal
 APIs['nth_argmax'] = {"argument": ['row', 'header', 'num'], 'output': 'row',
                       'function': lambda t, col, ind: nth_maxmin(t, col, order=ind, max_or_min="max", arg=True),
                       'tostr': lambda t, col, ind: "nth_argmax {{ {} ; {} ; {} }}".format(t, col, ind),
-                      'append': False}
+                      'tosstr': lambda t, col, ind: "nth_argmax {{ {} ; {} ; {} }}".format(t, col, ind),
+                      'append': False,
+                      'model_args': ['row', 'header', 'n']}
 
 APIs['nth_argmin'] = {"argument": ['row', 'header', 'num'], 'output': 'row',
                       'function': lambda t, col, ind: nth_maxmin(t, col, order=ind, max_or_min="min", arg=True),
                       'tostr': lambda t, col, ind: "nth_argmin {{ {} ; {} ; {} }}".format(t, col, ind),
-                      'append': False}
+                      'tosstr': lambda t, col, ind: "nth_argmin {{ {} ; {} ; {} }}".format(t, col, ind),
+                      'append': False,
+                      'model_args': ['row', 'header', 'n']}
 
 APIs['nth_max'] = {"argument": ['row', 'header', 'num'], 'output': 'obj',
                    "function": lambda t, col, ind: nth_maxmin(t, col, order=ind, max_or_min="max", arg=False),
                    "tostr": lambda t, col, ind: "nth_max {{ {} ; {} ; {} }}".format(t, col, ind),
-                   'append': True}
+                   "tosstr": lambda t, col, ind: "nth_max {{ {} ; {} ; {} }}".format(t, col, ind),
+                   'append': True,
+                   'model_args': ['row', 'header', 'n']}
 
 APIs['nth_min'] = {"argument": ['row', 'header', 'num'], 'output': 'obj',
                    "function": lambda t, col, ind: nth_maxmin(t, col, order=ind, max_or_min="min", arg=False),
                    "tostr": lambda t, col, ind: "nth_min {{ {} ; {} ; {} }}".format(t, col, ind),
-                   'append': True}
+                   "tosstr": lambda t, col, ind: "nth_min {{ {} ; {} ; {} }}".format(t, col, ind),
+                   'append': True,
+                   'model_args': ['row', 'header', 'n']}
 
 # With only two argument and the first is not row
 APIs['diff'] = {"argument": ['obj', 'obj'], 'output': 'obj',
                 'function': lambda t1, t2: obj_compare(t1, t2, type="diff"),
                 'tostr': lambda t1, t2: "diff {{ {} ; {} }}".format(t1, t2),
-                'append': True}
+                'tosstr': lambda t1, t2: "diff {{ {} ; {} }}".format(t1, t2),
+                'append': True,
+                'model_args': ['obj', 'obj']}
 
 # Greater takes two objects of same type (hop on filter_str_eq) and outputs a bool.
-APIs['greater'] = {"argument": ['obj', 'obj'], 'output': 'bool',
-                   'function': lambda t1, t2: obj_compare(t1, t2, type="greater"),
-                   'tostr': lambda t1, t2: "greater {{ {} ; {} }}".format(t1, t2),
-                   'append': False}
-
-APIs['less'] = {"argument": ['obj', 'obj'], 'output': 'bool',
-                'function': lambda t1, t2: obj_compare(t1, t2, type="less"),
-                'tostr': lambda t1, t2: "less {{ {} ; {} }}".format(t1, t2),
-                'append': True}
-
-APIs['eq'] = {"argument": ['obj', 'obj'], 'output': 'bool',
-              'function': lambda t1, t2: obj_compare(t1, t2, type="eq"),
-              'tostr': lambda t1, t2: "eq {{ {} ; {} }}".format(t1, t2),
-              'append': None}
-
-APIs['not_eq'] = {"argument": ['obj', 'obj'], 'output': 'bool',
-                  'function': lambda t1, t2: obj_compare(t1, t2, type="not_eq"),
-                  'tostr': lambda t1, t2: "not_eq {{ {} ; {} }}".format(t1, t2),
-                  "append": None}
-
-APIs['str_eq'] = {"argument": ['str', 'str'], 'output': 'bool',
-                  'function': lambda t1, t2: t1 in t2 or t2 in t1,
-                  'tostr': lambda t1, t2: "eq {{ {} ; {} }}".format(t1, t2),
-                  "append": None}
-
-APIs['not_str_eq'] = {"argument": ['str', 'str'], 'output': 'bool',
-                      'function': lambda t1, t2: t1 not in t2 and t2 not in t1,
-                      'tostr': lambda t1, t2: "not_eq {{ {} ; {} }}".format(t1, t2),
-                      "append": None}
-
-APIs['round_eq'] = {"argument": ['obj', 'obj'], 'output': 'bool',
-                    'function': lambda t1, t2: obj_compare(t1, t2, round=True, type="eq"),
-                    'tostr': lambda t1, t2: "round_eq {{ {} ; {} }}".format(t1, t2),
-                    'append': None}
-
-APIs['and'] = {"argument": ['bool', 'bool'], 'output': 'bool',
-               'function': lambda t1, t2: t1 and t2,
-               'tostr': lambda t1, t2: "and {{ {} ; {} }}".format(t1, t2),
-               "append": None}
+# APIs['greater'] = {"argument": ['obj', 'obj'], 'output': 'bool',
+#                    'function': lambda t1, t2: obj_compare(t1, t2, type="greater"),
+#                    'tostr': lambda t1, t2: "greater {{ {} ; {} }}".format(t1, t2),
+#                    'append': False}
+#
+# APIs['less'] = {"argument": ['obj', 'obj'], 'output': 'bool',
+#                 'function': lambda t1, t2: obj_compare(t1, t2, type="less"),
+#                 'tostr': lambda t1, t2: "less {{ {} ; {} }}".format(t1, t2),
+#                 'append': True}
+#
+# APIs['eq'] = {"argument": ['obj', 'obj'], 'output': 'bool',
+#               'function': lambda t1, t2: obj_compare(t1, t2, type="eq"),
+#               'tostr': lambda t1, t2: "eq {{ {} ; {} }}".format(t1, t2),
+#               'append': None}
+#
+# APIs['not_eq'] = {"argument": ['obj', 'obj'], 'output': 'bool',
+#                   'function': lambda t1, t2: obj_compare(t1, t2, type="not_eq"),
+#                   'tostr': lambda t1, t2: "not_eq {{ {} ; {} }}".format(t1, t2),
+#                   "append": None}
+#
+# APIs['str_eq'] = {"argument": ['str', 'str'], 'output': 'bool',
+#                   'function': lambda t1, t2: t1 in t2 or t2 in t1,
+#                   'tostr': lambda t1, t2: "eq {{ {} ; {} }}".format(t1, t2),
+#                   "append": None}
+#
+# APIs['not_str_eq'] = {"argument": ['str', 'str'], 'output': 'bool',
+#                       'function': lambda t1, t2: t1 not in t2 and t2 not in t1,
+#                       'tostr': lambda t1, t2: "not_eq {{ {} ; {} }}".format(t1, t2),
+#                       "append": None}
+#
+# APIs['round_eq'] = {"argument": ['obj', 'obj'], 'output': 'bool',
+#                     'function': lambda t1, t2: obj_compare(t1, t2, round=True, type="eq"),
+#                     'tostr': lambda t1, t2: "round_eq {{ {} ; {} }}".format(t1, t2),
+#                     'append': None}
+#
+# APIs['and'] = {"argument": ['bool', 'bool'], 'output': 'bool',
+#                'function': lambda t1, t2: t1 and t2,
+#                'tostr': lambda t1, t2: "and {{ {} ; {} }}".format(t1, t2),
+#                "append": None}
 
 # With only three argument and the first is row
 # str
 APIs["filter_str_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "row",
                          "function": lambda t, col, value: fuzzy_match_filter(t, col, value),
-                         "tostr": lambda t, col, value: "filter_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                         'append': False}
+                         "tostr": lambda t, col, value: "filter_str_eq {{ {} ; {} ; {} }}".format(t, col, value),
+                         "tosstr": lambda t, col, value: "filter_eq {{ {} ; {} ; {} }}".format(t, col, value),
+                         'append': False,
+                         'model_args': ['row', 'memory_str']}
 
 APIs["filter_str_not_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "row",
                              "function": lambda t, col, value: fuzzy_match_filter(t, col, value, negate=True),
-                             "tostr": lambda t, col, value: "filter_not_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                             'append': False}
+                             "tostr": lambda t, col, value: "filter_str_not_eq {{ {} ; {} ; {} }}".format(t, col,
+                                                                                                          value),
+                             "tosstr": lambda t, col, value: "filter_not_eq {{ {} ; {} ; {} }}".format(t, col, value),
+                             'append': False,
+                             'model_args': ['row', 'memory_str']}
 
 # obj: num or str
 APIs["filter_eq"] = {"argument": ['row', 'header', 'obj'], "output": "row",
                      "function": lambda t, col, value: fuzzy_compare_filter(t, col, value, type="eq"),
                      "tostr": lambda t, col, value: "filter_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                     'append': False}
+                     "tosstr": lambda t, col, value: "filter_eq {{ {} ; {} ; {} }}".format(t, col, value),
+                     'append': False,
+                     'model_args': ['row', 'memory']}
 
 APIs["filter_not_eq"] = {"argument": ['row', 'header', 'obj'], "output": "row",
                          "function": lambda t, col, value: fuzzy_compare_filter(t, col, value, type="not_eq"),
                          "tostr": lambda t, col, value: "filter_not_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                         'append': False}
+                         "tosstr": lambda t, col, value: "filter_not_eq {{ {} ; {} ; {} }}".format(t, col, value),
+                         'append': False,
+                         'model_args': ['row', 'memory']}
 
 APIs["filter_less"] = {"argument": ['row', 'header', 'obj'], "output": "row",
                        "function": lambda t, col, value: fuzzy_compare_filter(t, col, value, type="less"),
                        "tostr": lambda t, col, value: "filter_less {{ {} ; {} ; {} }}".format(t, col, value),
-                       "append": False}
+                       "tosstr": lambda t, col, value: "filter_less {{ {} ; {} ; {} }}".format(t, col, value),
+                       "append": False,
+                       'model_args': ['row', 'memory']}
 
 APIs["filter_greater"] = {"argument": ['row', 'header', 'obj'], "output": "row",
                           "function": lambda t, col, value: fuzzy_compare_filter(t, col, value, type="greater"),
                           "tostr": lambda t, col, value: "filter_greater {{ {} ; {} ; {} }}".format(t, col, value),
-                          "append": False}
+                          "tosstr": lambda t, col, value: "filter_greater {{ {} ; {} ; {} }}".format(t, col, value),
+                          "append": False,
+                          'model_args': ['row', 'memory']}
 
 APIs["filter_greater_eq"] = {"argument": ['row', 'header', 'obj'], "output": "row",
                              "function": lambda t, col, value: fuzzy_compare_filter(t, col, value, type="greater_eq"),
                              "tostr": lambda t, col, value: "filter_greater_eq {{ {} ; {} ; {} }}".format(t, col,
                                                                                                           value),
-                             "append": False}
+                             "tosstr": lambda t, col, value: "filter_greater_eq {{ {} ; {} ; {} }}".format(t, col,
+                                                                                                           value),
+                             "append": False,
+                             'model_args': ['row', 'memory']}
 
 APIs["filter_less_eq"] = {"argument": ['row', 'header', 'obj'], "output": "row",
                           "function": lambda t, col, value: fuzzy_compare_filter(t, col, value, type="less_eq"),
                           "tostr": lambda t, col, value: "filter_less_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                          "append": False}
+                          "tosstr": lambda t, col, value: "filter_less_eq {{ {} ; {} ; {} }}".format(t, col, value),
+                          "append": False,
+                          'model_args': ['row', 'memory']}
 
 # APIs["filter_all"] = {"argument": ['row', 'header'], "output": "row",
 #                       "function": lambda t, col: t,
@@ -214,97 +301,97 @@ APIs["filter_less_eq"] = {"argument": ['row', 'header', 'obj'], "output": "row",
 
 # all
 # str
-APIs["all_str_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "bool",
-                      "function": lambda t, col, value: len(t) == len(fuzzy_match_filter(t, col, value)),
-                      "tostr": lambda t, col, value: "all_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                      "append": None}
-
-APIs["all_str_not_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "bool",
-                          "function": lambda t, col, value: 0 == len(fuzzy_match_filter(t, col, value)),
-                          "tostr": lambda t, col, value: "all_not_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                          "append": None}
-
-# obj: num or str
-APIs["all_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
-                  "function": lambda t, col, value: len(t) == len(fuzzy_compare_filter(t, col, value, type="eq")),
-                  "tostr": lambda t, col, value: "all_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                  "append": None}
-
-APIs["all_not_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
-                      "function": lambda t, col, value: 0 == len(fuzzy_compare_filter(t, col, value, type="eq")),
-                      "tostr": lambda t, col, value: "all_not_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                      "append": None}
-
-APIs["all_less"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
-                    "function": lambda t, col, value: len(t) == len(fuzzy_compare_filter(t, col, value, type="less")),
-                    "tostr": lambda t, col, value: "all_less {{ {} ; {} ; {} }}".format(t, col, value),
-                    "append": None}
-
-APIs["all_less_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
-                       "function": lambda t, col, value: len(t) == len(
-                           fuzzy_compare_filter(t, col, value, type="less_eq")),
-                       "tostr": lambda t, col, value: "all_less_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                       "append": None}
-
-APIs["all_greater"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
-                       "function": lambda t, col, value: len(t) == len(
-                           fuzzy_compare_filter(t, col, value, type="greater")),
-                       "tostr": lambda t, col, value: "all_greater {{ {} ; {} ; {} }}".format(t, col, value),
-                       "append": None}
-
-APIs["all_greater_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
-                          "function": lambda t, col, value: len(t) == len(
-                              fuzzy_compare_filter(t, col, value, type="greater_eq")),
-                          "tostr": lambda t, col, value: "all_greater_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                          "append": None}
-
-# most
-# str
-APIs["most_str_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "bool",
-                       "function": lambda t, col, value: len(t) // 3 <= len(fuzzy_match_filter(t, col, value)),
-                       "tostr": lambda t, col, value: "most_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                       "append": None}
-
-APIs["most_str_not_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "bool",
-                           "function": lambda t, col, value: len(t) // 3 > len(fuzzy_match_filter(t, col, value)),
-                           "tostr": lambda t, col, value: "most_not_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                           "append": None}
-
-# obj: num or str
-APIs["most_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
-                   "function": lambda t, col, value: len(t) // 3 <= len(fuzzy_compare_filter(t, col, value, type="eq")),
-                   "tostr": lambda t, col, value: "most_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                   "append": None}
-
-APIs["most_not_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
-                       "function": lambda t, col, value: len(t) // 3 > len(
-                           fuzzy_compare_filter(t, col, value, type="eq")),
-                       "tostr": lambda t, col, value: "most_not_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                       "append": None}
-
-APIs["most_less"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
-                     "function": lambda t, col, value: len(t) // 3 <= len(
-                         fuzzy_compare_filter(t, col, value, type="less")),
-                     "tostr": lambda t, col, value: "most_less {{ {} ; {} ; {} }}".format(t, col, value),
-                     "append": None}
-
-APIs["most_less_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
-                        "function": lambda t, col, value: len(t) // 3 <= len(
-                            fuzzy_compare_filter(t, col, value, type="less_eq")),
-                        "tostr": lambda t, col, value: "most_less_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                        "append": None}
-
-APIs["most_greater"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
-                        "function": lambda t, col, value: len(t) // 3 <= len(
-                            fuzzy_compare_filter(t, col, value, type="greater")),
-                        "tostr": lambda t, col, value: "most_greater {{ {} ; {} ; {} }}".format(t, col, value),
-                        "append": None}
-
-APIs["most_greater_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
-                           "function": lambda t, col, value: len(t) // 3 <= len(
-                               fuzzy_compare_filter(t, col, value, type="greater_eq")),
-                           "tostr": lambda t, col, value: "most_greater_eq {{ {} ; {} ; {} }}".format(t, col, value),
-                           "append": None}
+# APIs["all_str_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "bool",
+#                       "function": lambda t, col, value: len(t) == len(fuzzy_match_filter(t, col, value)),
+#                       "tostr": lambda t, col, value: "all_eq {{ {} ; {} ; {} }}".format(t, col, value),
+#                       "append": None}
+#
+# APIs["all_str_not_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "bool",
+#                           "function": lambda t, col, value: 0 == len(fuzzy_match_filter(t, col, value)),
+#                           "tostr": lambda t, col, value: "all_not_eq {{ {} ; {} ; {} }}".format(t, col, value),
+#                           "append": None}
+#
+# # obj: num or str
+# APIs["all_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
+#                   "function": lambda t, col, value: len(t) == len(fuzzy_compare_filter(t, col, value, type="eq")),
+#                   "tostr": lambda t, col, value: "all_eq {{ {} ; {} ; {} }}".format(t, col, value),
+#                   "append": None}
+#
+# APIs["all_not_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
+#                       "function": lambda t, col, value: 0 == len(fuzzy_compare_filter(t, col, value, type="eq")),
+#                       "tostr": lambda t, col, value: "all_not_eq {{ {} ; {} ; {} }}".format(t, col, value),
+#                       "append": None}
+#
+# APIs["all_less"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
+#                     "function": lambda t, col, value: len(t) == len(fuzzy_compare_filter(t, col, value, type="less")),
+#                     "tostr": lambda t, col, value: "all_less {{ {} ; {} ; {} }}".format(t, col, value),
+#                     "append": None}
+#
+# APIs["all_less_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
+#                        "function": lambda t, col, value: len(t) == len(
+#                            fuzzy_compare_filter(t, col, value, type="less_eq")),
+#                        "tostr": lambda t, col, value: "all_less_eq {{ {} ; {} ; {} }}".format(t, col, value),
+#                        "append": None}
+#
+# APIs["all_greater"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
+#                        "function": lambda t, col, value: len(t) == len(
+#                            fuzzy_compare_filter(t, col, value, type="greater")),
+#                        "tostr": lambda t, col, value: "all_greater {{ {} ; {} ; {} }}".format(t, col, value),
+#                        "append": None}
+#
+# APIs["all_greater_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
+#                           "function": lambda t, col, value: len(t) == len(
+#                               fuzzy_compare_filter(t, col, value, type="greater_eq")),
+#                           "tostr": lambda t, col, value: "all_greater_eq {{ {} ; {} ; {} }}".format(t, col, value),
+#                           "append": None}
+#
+# # most
+# # str
+# APIs["most_str_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "bool",
+#                        "function": lambda t, col, value: len(t) // 3 <= len(fuzzy_match_filter(t, col, value)),
+#                        "tostr": lambda t, col, value: "most_eq {{ {} ; {} ; {} }}".format(t, col, value),
+#                        "append": None}
+#
+# APIs["most_str_not_eq"] = {"argument": ['row', 'header_str', 'str'], "output": "bool",
+#                            "function": lambda t, col, value: len(t) // 3 > len(fuzzy_match_filter(t, col, value)),
+#                            "tostr": lambda t, col, value: "most_not_eq {{ {} ; {} ; {} }}".format(t, col, value),
+#                            "append": None}
+#
+# # obj: num or str
+# APIs["most_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
+#                    "function": lambda t, col, value: len(t) // 3 <= len(fuzzy_compare_filter(t, col, value, type="eq")),
+#                    "tostr": lambda t, col, value: "most_eq {{ {} ; {} ; {} }}".format(t, col, value),
+#                    "append": None}
+#
+# APIs["most_not_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
+#                        "function": lambda t, col, value: len(t) // 3 > len(
+#                            fuzzy_compare_filter(t, col, value, type="eq")),
+#                        "tostr": lambda t, col, value: "most_not_eq {{ {} ; {} ; {} }}".format(t, col, value),
+#                        "append": None}
+#
+# APIs["most_less"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
+#                      "function": lambda t, col, value: len(t) // 3 <= len(
+#                          fuzzy_compare_filter(t, col, value, type="less")),
+#                      "tostr": lambda t, col, value: "most_less {{ {} ; {} ; {} }}".format(t, col, value),
+#                      "append": None}
+#
+# APIs["most_less_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
+#                         "function": lambda t, col, value: len(t) // 3 <= len(
+#                             fuzzy_compare_filter(t, col, value, type="less_eq")),
+#                         "tostr": lambda t, col, value: "most_less_eq {{ {} ; {} ; {} }}".format(t, col, value),
+#                         "append": None}
+#
+# APIs["most_greater"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
+#                         "function": lambda t, col, value: len(t) // 3 <= len(
+#                             fuzzy_compare_filter(t, col, value, type="greater")),
+#                         "tostr": lambda t, col, value: "most_greater {{ {} ; {} ; {} }}".format(t, col, value),
+#                         "append": None}
+#
+# APIs["most_greater_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool",
+#                            "function": lambda t, col, value: len(t) // 3 <= len(
+#                                fuzzy_compare_filter(t, col, value, type="greater_eq")),
+#                            "tostr": lambda t, col, value: "most_greater_eq {{ {} ; {} ; {} }}".format(t, col, value),
+#                            "append": None}
 
 ## Inverse functions here
 
@@ -319,9 +406,12 @@ APIs["most_greater_eq"] = {"argument": ['row', 'header', 'obj'], "output": "bool
 
 APIs['greater_str_inv'] = {"argument": ['row', 'header_str', 'str', 'header'], 'output': 'list_str',
                            'function': lambda t, col1, val, col2: gl_inv_str(t, col1, val, col2, "greater"),
-                           'tostr': lambda t, col1, val, col2: "greater_inv {{ {} ; {} ; {} ; {} }}".format(
+                           'tostr': lambda t, col1, val, col2: "greater_str_inv {{ {} ; {} ; {} ; {} }}".format(
                                t, col1, val, col2),
-                           'append': None}
+                           'tosstr': lambda t, col1, val, col2: "greater_inv {{ {} ; {} ; {} ; {} }}".format(
+                               t, col1, val, col2),
+                           'append': None,
+                           'model_args': ['row', 'memory_str', 'header']}
 
 # APIs['less_inv'] = {"argument": ['row', 'header', 'obj', 'header'], 'output': 'list_obj',
 #                     'function': lambda t, col1, val, col2: gl_inv(t, col1, val, col2, "less"),
@@ -331,9 +421,12 @@ APIs['greater_str_inv'] = {"argument": ['row', 'header_str', 'str', 'header'], '
 
 APIs['less_str_inv'] = {"argument": ['row', 'header_str', 'str', 'header'], 'output': 'list_str',
                         'function': lambda t, col1, val, col2: gl_inv_str(t, col1, val, col2, "less"),
-                        'tostr': lambda t, col1, val, col2: "less_inv {{ {} ; {} ; {} ; {} }}".format(
+                        'tostr': lambda t, col1, val, col2: "less_str_inv {{ {} ; {} ; {} ; {} }}".format(
                             t, col1, val, col2),
-                        'append': None}
+                        'tosstr': lambda t, col1, val, col2: "less_inv {{ {} ; {} ; {} ; {} }}".format(
+                            t, col1, val, col2),
+                        'append': None,
+                        'model_args': ['row', 'memory_str', 'header']}
 
 # Write the most_str_eq_inv func. Takes 'row', 'header' as input and outputs the values which occurs majority
 # of the times (>= len(t) // 3). This is not exactly right because the value may also be a substr for majority of
@@ -342,16 +435,21 @@ APIs['less_str_inv'] = {"argument": ['row', 'header_str', 'str', 'header'], 'out
 # Precondition: The majority value occurs at least len(t) // 3 times in the header.
 APIs["most_str_eq_inv"] = {"argument": ['row', 'header_str'], "output": "list_str",
                            "function": lambda t, col: str_eq_inv(t, col, "most"),
-                           "tostr": lambda t, col: "most_eq_inv {{ {} ; {} }}".format(t, col),
-                           "append": None}
+                           "tostr": lambda t, col: "most_str_eq_inv {{ {} ; {} }}".format(t, col),
+                           "tosstr": lambda t, col: "most_eq_inv {{ {} ; {} }}".format(t, col),
+                           "append": None,
+                           'model_args': ['row', 'header_str']}
 
 # Write the all_str_eq_inv func. Takes 'row', 'header' as input and does the following:
 # 1. Trim whitespaces 2. Find and return the largest common substr
 # Precondition: Such a substr should exist
+# TODO: return the largest common substrs
 APIs["all_str_eq_inv"] = {"argument": ['row', 'header_str'], "output": "str",
                           "function": lambda t, col: str_eq_inv(t, col, "all"),
-                          "tostr": lambda t, col: "all_eq_inv {{ {} ; {} }}".format(t, col),
-                          "append": None}
+                          "tostr": lambda t, col: "all_str_eq_inv {{ {} ; {} }}".format(t, col),
+                          "tosstr": lambda t, col: "all_eq_inv {{ {} ; {} }}".format(t, col),
+                          "append": None,
+                          'model_args': ['row', 'header_str']}
 
 # Write the most_greater_inv func. Takes 'row', 'header' as input, creates a df of datetime and numbers using
 # regex pats and returns the largest element x such that len(df[df > x]) >= len(t) // 3. This return value signifies a
@@ -359,12 +457,16 @@ APIs["all_str_eq_inv"] = {"argument": ['row', 'header_str'], "output": "str",
 APIs["most_greater_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
                             "function": lambda t, col: fuzzy_comp_inv(t, col, "mgt"),
                             "tostr": lambda t, col: "most_greater_inv {{ {} ; {} }}".format(t, col),
-                            "append": None}
+                            "tosstr": lambda t, col: "most_greater_inv {{ {} ; {} }}".format(t, col),
+                            "append": None,
+                            'model_args': ['row', 'header']}
 
 APIs["most_greater_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
                                "function": lambda t, col: fuzzy_comp_inv(t, col, "mgte"),
                                "tostr": lambda t, col: "most_greater_eq_inv {{ {} ; {} }}".format(t, col),
-                               "append": None}
+                               "tosstr": lambda t, col: "most_greater_eq_inv {{ {} ; {} }}".format(t, col),
+                               "append": None,
+                               'model_args': ['row', 'header']}
 
 # Write the most_less_inv func. Takes 'row', 'header' as input, creates a df of datetime and numbers using
 # regex pats and returns the smallest element x such that len(df[df < x]) >= len(t) // 3. This return value signifies a
@@ -372,32 +474,44 @@ APIs["most_greater_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_ob
 APIs["most_less_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
                          "function": lambda t, col: fuzzy_comp_inv(t, col, "mlt"),
                          "tostr": lambda t, col: "most_less_inv {{ {} ; {} }}".format(t, col),
-                         "append": None}
+                         "tosstr": lambda t, col: "most_less_inv {{ {} ; {} }}".format(t, col),
+                         "append": None,
+                         'model_args': ['row', 'header']}
 
 APIs["most_less_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
                             "function": lambda t, col: fuzzy_comp_inv(t, col, "mlte"),
                             "tostr": lambda t, col: "most_less_eq_inv {{ {} ; {} }}".format(t, col),
-                            "append": None}
+                            "tosstr": lambda t, col: "most_less_eq_inv {{ {} ; {} }}".format(t, col),
+                            "append": None,
+                            'model_args': ['row', 'header']}
 
 APIs["all_greater_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
                            "function": lambda t, col: fuzzy_comp_inv(t, col, "agt"),
                            "tostr": lambda t, col: "all_greater_inv {{ {} ; {} }}".format(t, col),
-                           "append": None}
+                           "tosstr": lambda t, col: "all_greater_inv {{ {} ; {} }}".format(t, col),
+                           "append": None,
+                           'model_args': ['row', 'header']}
 
 APIs["all_greater_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
                               "function": lambda t, col: fuzzy_comp_inv(t, col, "agte"),
                               "tostr": lambda t, col: "all_greater_eq_inv {{ {} ; {} }}".format(t, col),
-                              "append": None}
+                              "tosstr": lambda t, col: "all_greater_eq_inv {{ {} ; {} }}".format(t, col),
+                              "append": None,
+                              'model_args': ['row', 'header']}
 
 APIs["all_less_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
                         "function": lambda t, col: fuzzy_comp_inv(t, col, "alt"),
                         "tostr": lambda t, col: "all_less_inv {{ {} ; {} }}".format(t, col),
-                        "append": None}
+                        "tosstr": lambda t, col: "all_less_inv {{ {} ; {} }}".format(t, col),
+                        "append": None,
+                        'model_args': ['row', 'header']}
 
 APIs["all_less_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
                            "function": lambda t, col: fuzzy_comp_inv(t, col, "alte"),
                            "tostr": lambda t, col: "all_less_eq_inv {{ {} ; {} }}".format(t, col),
-                           "append": None}
+                           "tosstr": lambda t, col: "all_less_eq_inv {{ {} ; {} }}".format(t, col),
+                           "append": None,
+                           'model_args': ['row', 'header']}
 
 # Write the most_eq_inv func. most_eq_inv takes as input a 'row', 'header' and creates a date df and a num df from
 # regex pats. From there, it creates a counter of values and returns all the keys as output that have counts/values
@@ -406,15 +520,20 @@ APIs["all_less_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
 APIs["most_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_list_obj",
                        "function": lambda t, col: fuzzy_comp_inv(t, col, "meq"),
                        "tostr": lambda t, col: "most_eq_inv {{ {} ; {} }}".format(t, col),
-                       "append": None}
+                       "tosstr": lambda t, col: "most_eq_inv {{ {} ; {} }}".format(t, col),
+                       "append": None,
+                       'model_args': ['row', 'header']}
 
 # Write the all_eq_inv func. Takes 'row', 'header' as input and outputs the eq value(s)
 # on datetime df and the num df.
 # Precondition: All col values are equal.
+# TODO: Check if all months are equal or all days are equal or all years are equal
 APIs["all_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
                       "function": lambda t, col: fuzzy_comp_inv(t, col, "aeq"),
                       "tostr": lambda t, col: "all_eq_inv {{ {} ; {} }}".format(t, col),
-                      "append": None}
+                      "tosstr": lambda t, col: "all_eq_inv {{ {} ; {} }}".format(t, col),
+                      "append": None,
+                      'model_args': ['row', 'header']}
 
 month_map = {'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
              'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12,
