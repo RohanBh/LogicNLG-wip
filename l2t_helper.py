@@ -297,11 +297,66 @@ def check_num_rows():
     return
 
 
+def find_trigger_words(sorted_order=False):
+    with open('data/l2t/train.json', 'r') as f:
+        data = json.load(f)
+
+    with open('data/stop_words.json') as f:
+        stop_words = set(json.load(f))
+
+    def recursive_get(logic_json):
+        all_funcs = {logic_json['func']}
+        for arg in logic_json['args']:
+            if type(arg) is dict:
+                all_funcs.update(recursive_get(arg))
+            else:
+                continue
+        return all_funcs
+
+    def update_ctr(d1, d2):
+        for k in d2:
+            if k not in d1:
+                d1[k] = 0
+            d1[k] += 1
+        return
+
+    func2triggers = {}
+    for entry in data:
+        action = entry['action']
+        all_funcs_in_curr_entry = recursive_get(entry['logic'])
+        main_funcs = all_funcs_in_curr_entry.intersection(type2funcs[action])
+        for f in main_funcs:
+            if f not in func2triggers:
+                func2triggers[f] = {'_count': 0}
+            update_ctr(func2triggers[f], entry['sent'].split(' '))
+            func2triggers[f]['_count'] += 1
+
+    for f in list(func2triggers.keys()):
+        func2triggers[f] = {k: v for k, v in func2triggers[f].items() if k not in stop_words}
+        # total_ct = sum(v for k, v in func2triggers[f].items() if k != '_count')
+        total_ct = func2triggers[f]['_count']
+        # if f == 'argmin':
+        #     print(dict(sorted(func2triggers['argmin'].items(), key=lambda x: (-x[-1], x[0]))))
+        #     print(dict(sorted(func2triggers['argmin'].items(), key=lambda x: (-x[-1], x[0]))))
+        func2triggers[f] = {k: v for k, v in func2triggers[f].items() if v / total_ct > 0.05 and v != 1}
+
+    if not sorted_order:
+        pprint.pprint(func2triggers)
+    else:
+        new_func2set = {}
+        for f in sorted(func2triggers.keys()):
+            pairs = sorted(func2triggers[f].items(), key=lambda x: (x[-1], x[0]), reverse=True)
+            new_func2set[f] = dict(pairs)
+        pprint.pprint(new_func2set, sort_dicts=False)
+    return
+
+
 if __name__ == '__main__':
     # print_all_first_funcs()
     # missing entries in comp comes from not including 'eq' on two hops
-    print_type_2_funccount(sorted_order=True)
+    # print_type_2_funccount(sorted_order=True)
     # check_ordinal_property()
     # check_comp_property()
     # check_num_rows()
     # find_comp_eq()
+    find_trigger_words(sorted_order=True)
