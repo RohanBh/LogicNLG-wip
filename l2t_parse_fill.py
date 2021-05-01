@@ -5,17 +5,13 @@ import os
 import random
 import re
 import time
-import warnings
 
 import nltk
 import numpy as np
 import pandas
 import pandas as pd
-import torch
-import torch.nn.functional as F
 from nltk.corpus import wordnet
 from nltk.stem import WordNetLemmatizer
-from torch import nn, optim
 from tqdm.auto import tqdm
 from unidecode import unidecode
 
@@ -1221,38 +1217,6 @@ def get_col_types(t):
     return col2type
 
 
-class MLPProjector(nn.Module):
-    def __init__(self, hidden_size=64, in_dim_1=300, in_dim_2=50, out_dim=300):
-        """
-        in_dim_1 is for the word_vec and in_dim_2 is for other cumulative features
-        Args:
-            hidden_size:
-            in_dim_1:
-            in_dim_2:
-            out_dim:
-        """
-        super(MLPProjector, self).__init__()
-        self.lstm = nn.LSTM(in_dim_1, hidden_size)
-        self.l1 = nn.Linear(hidden_size + in_dim_2, hidden_size)
-        self.l2 = nn.Linear(hidden_size, hidden_size)
-        self.l3 = nn.Linear(hidden_size, out_dim)
-        return
-
-    def forward(self, vector):
-        word_vecs = torch.FloatTensor(vector[:-1])
-        features = torch.FloatTensor(vector[-1])
-        # x -> (seq_len, batch, in_dim), out - (seq_len, batch, hidden_size)
-        word_vecs = torch.unsqueeze(word_vecs, 1)
-        features = torch.unsqueeze(features, 0)
-        features = torch.unsqueeze(features, 0)
-        out, (hn, cn) = self.lstm(word_vecs)
-        x = torch.cat([hn, features], dim=-1)
-        x = F.relu(self.l1(x))
-        x = F.relu(self.l2(x))
-        x = self.l3(x)
-        return x
-
-
 class Parser(object):
     def __init__(self, folder, lemmatize_verbs=True):
         self.folder = folder
@@ -1288,14 +1252,20 @@ class Parser(object):
         self.model1 = None
         self.model2 = None
         self.optimizer = None
-        self.embeddings_dict = {}
+        self._embeddings_dict = {}
+        return
+
+    @property
+    def embeddings_dict(self):
+        if len(self._embeddings_dict) > 0:
+            return self._embeddings_dict
         with open("data/glove.6B.50d.txt", 'r', encoding="utf-8") as f:
             for line in f:
                 values = line.split()
                 word = values[0]
                 vector = np.asarray(values[1:], "float32")
-                self.embeddings_dict[word] = vector
-        return
+                self._embeddings_dict[word] = vector
+        return self._embeddings_dict
 
     def get_embd(self, w):
         w = str(w)
@@ -1445,6 +1415,9 @@ class Parser(object):
         return idx2vec
 
     def new_entity_link(self, table_name, sent, pos):
+        import torch
+        import torch.nn.functional as F
+        from Model import MLPProjector
         inside = False
         # whether at the index part of the linked entity
         position = False
@@ -1935,6 +1908,8 @@ class Parser(object):
         return len(c), result, masked_sent, mapping
 
     def train_entity_linker(self, data=None):
+        import torch
+        from torch import optim
         if data is None:
             with open('data/l2t/train_el.json', 'r') as f:
                 data = json.load(f)
@@ -2027,7 +2002,7 @@ class Parser(object):
         formatted_sent = re.sub(r"\s+", '-', formatted_sent)
         if len(formatted_sent) > 100:
             formatted_sent = formatted_sent[-100:]
-
+        formatted_sent = table_name + '-' + formatted_sent
         if not os.path.exists('tmp/results/{}.json'.format(formatted_sent)):
             sent, pos_tags = self.normalize(sent)
             raw_sent = " ".join(sent)
@@ -2334,6 +2309,8 @@ def train_el(num_episodes):
     with open('data/l2t/train_el.json', 'r') as f:
         data = json.load(f)
     parser = Parser("data/all_csv")
+
+    import warnings
     with warnings.catch_warnings():
         warnings.simplefilter('ignore', FutureWarning)
         for i in range(num_episodes):

@@ -513,3 +513,35 @@ class ActorCritic(nn.Module):
             logits[legal_actions:] = -float('Inf')
         prob = torch.softmax(logits, -1)
         return prob, self.l2(x).cpu()
+
+
+class MLPProjector(nn.Module):
+    def __init__(self, hidden_size=64, in_dim_1=300, in_dim_2=50, out_dim=300):
+        """
+        in_dim_1 is for the word_vec and in_dim_2 is for other cumulative features
+        Args:
+            hidden_size:
+            in_dim_1:
+            in_dim_2:
+            out_dim:
+        """
+        super(MLPProjector, self).__init__()
+        self.lstm = nn.LSTM(in_dim_1, hidden_size)
+        self.l1 = nn.Linear(hidden_size + in_dim_2, hidden_size)
+        self.l2 = nn.Linear(hidden_size, hidden_size)
+        self.l3 = nn.Linear(hidden_size, out_dim)
+        return
+
+    def forward(self, vector):
+        word_vecs = torch.FloatTensor(vector[:-1])
+        features = torch.FloatTensor(vector[-1])
+        # x -> (seq_len, batch, in_dim), out - (seq_len, batch, hidden_size)
+        word_vecs = torch.unsqueeze(word_vecs, 1)
+        features = torch.unsqueeze(features, 0)
+        features = torch.unsqueeze(features, 0)
+        out, (hn, cn) = self.lstm(word_vecs)
+        x = torch.cat([hn, features], dim=-1)
+        x = F.relu(self.l1(x))
+        x = F.relu(self.l2(x))
+        x = self.l3(x)
+        return x
