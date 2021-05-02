@@ -791,7 +791,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                 else:
                     continue
 
-        if len(finished) > 100 or time.time() - start_time > 150:
+        if len(finished) > 100 or time.time() - start_time > 30:
             break
 
     return (name, orig_sent, sent, [_[0].cur_str for _ in finished])
@@ -2013,7 +2013,7 @@ class Parser(object):
             # mem_str, mem_num, mem_date, head_str, head_num, head_date,
             ret_val = self.initialize_buffer(table_name, linked_sent, pos, raw_sent)
             masked_sent, mem_str, mem_num, mem_date, _, _, _, non_linked_num, mapping = ret_val
-            head_str, head_num, head_date = self.get_headers(table_name)
+            head_num, head_str, head_date = self.get_headers(table_name)
 
             masked_val = None
             if action in ['comparative', 'majority']:
