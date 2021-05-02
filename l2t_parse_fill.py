@@ -2230,7 +2230,8 @@ def generate_programs():
         args.append((table_name, sent, logic_json, action))
 
     with mp.Pool(mp.cpu_count()) as pool:
-        results = list(tqdm(pool.imap_unordered(parser.distribute_parse, args, chunksize=1), total=len(args)))
+        list(tqdm(pool.imap_unordered(parser.distribute_parse, args, chunksize=1), total=len(args)))
+        results = list(tqdm(pool.map(parser.distribute_parse, args), total=len(args)))
 
     with open("data/programs.json", 'w') as f:
         json.dump(results, f, indent=2)
