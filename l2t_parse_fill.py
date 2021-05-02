@@ -16,7 +16,7 @@ from tqdm.auto import tqdm
 from unidecode import unidecode
 
 from APIs import non_triggers, fuzzy_match
-from l2t_api import obj_compare, APIs, pat_add, pat_num, pat_month, ExeError
+from l2t_api import obj_compare, APIs, pat_add, pat_num, pat_month, ExeError, safe_obj_compare
 
 with open('data/freq_list.json') as f:
     vocab = json.load(f)
@@ -453,7 +453,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                 if tmp.done():
                                     tmp.append_result(
                                         command,
-                                        f'{returned}/' + str(f'{obj_compare(masked_val[1], returned)}'))
+                                        f'{returned}/' + str(obj_compare(masked_val[1], returned)))
                                     finished.append((tmp, returned))
                                 else:
                                     tmp.add_memory_num("tmp_count", returned, command)
@@ -483,7 +483,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                     if tmp.done():
                                         tmp.append_result(
                                             command,
-                                            f'{returned}/' + str(f'{obj_compare(masked_val[1], returned)}'))
+                                            f'{returned}/' + str(obj_compare(masked_val[1], returned)))
                                         finished.append((tmp, returned))
                                     else:
                                         tmp.add_memory("tmp_" + root.all_headers[l], returned, command,
@@ -506,7 +506,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                         if tmp.done():
                                             tmp.append_result(
                                                 command,
-                                                f'{returned}/' + str(f'{obj_compare(masked_val[1], returned)}'))
+                                                f'{returned}/' + str(obj_compare(masked_val[1], returned)))
                                             finished.append((tmp, returned))
                                         else:
                                             tmp.add_memory("tmp_" + root.obj_headers[l], returned, command,
@@ -534,7 +534,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                                 tmp.append_result(
                                                     command,
                                                     f'{returned[1]}/' +
-                                                    str(f'{obj_compare(masked_val[1], returned[1], type=comp_type)}'))
+                                                    str(safe_obj_compare(masked_val[1], returned[1], type=comp_type)))
                                                 finished.append((tmp, returned[1]))
                                             elif len(re.findall(pat_num, masked_val[1])) > 0:
                                                 if returned[0] is None:
@@ -542,7 +542,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                                 tmp.append_result(
                                                     command,
                                                     f'{returned[0]}/' +
-                                                    str(f'{obj_compare(masked_val[1], returned[0], type=comp_type)}'))
+                                                    str(safe_obj_compare(masked_val[1], returned[0], type=comp_type)))
                                                 finished.append((tmp, returned[0]))
                                             else:
                                                 continue
@@ -560,7 +560,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                                     tmp_new = copy.deepcopy(tmp)
                                                     tmp_new.append_result(
                                                         command,
-                                                        f'{ret_val}/' + str(f'{obj_compare(masked_val[1], ret_val)}'))
+                                                        f'{ret_val}/' + str(obj_compare(masked_val[1], ret_val)))
                                                     finished.append((tmp_new, ret_val))
                                             else:
                                                 continue
@@ -585,7 +585,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                     if tmp.done():
                                         tmp.append_result(
                                             command,
-                                            f'{returned}/' + str(f'{obj_compare(masked_val[1], returned, True)}'))
+                                            f'{returned}/' + str(obj_compare(masked_val[1], returned, True)))
                                         finished.append((tmp, returned))
                                     else:
                                         tmp.add_memory_num("tmp_" + root.header_num[l], returned, command)
@@ -611,7 +611,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                     if tmp.done():
                                         tmp.append_result(
                                             command,
-                                            f'{returned}/' + str(f'{obj_compare(masked_val[1], returned)}'))
+                                            f'{returned}/' + str(obj_compare(masked_val[1], returned)))
                                         finished.append((tmp, returned))
                                 elif v['output'] == 'list_str':
                                     if tmp.done():
@@ -619,7 +619,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                             tmp_new = copy.deepcopy(tmp)
                                             tmp_new.append_result(
                                                 command,
-                                                f'{ret_val}/' + str(f'{obj_compare(masked_val[1], ret_val)}'))
+                                                f'{ret_val}/' + str(obj_compare(masked_val[1], ret_val)))
                                             finished.append((tmp_new, ret_val))
                                 else:
                                     raise ValueError("error, output of scope")
@@ -660,7 +660,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                             if tmp.done():
                                                 tmp.append_result(
                                                     command,
-                                                    f'{returned}/' + str(f'{obj_compare(masked_val[1], returned)}'))
+                                                    f'{returned}/' + str(obj_compare(masked_val[1], returned)))
                                                 finished.append((tmp, returned))
                                             else:
                                                 tmp.add_memory("tmp_" + root.memory_num[dir1][0], returned,
@@ -742,7 +742,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                         if tmp.done():
                                             tmp.append_result(
                                                 command,
-                                                f'{returned}/' + str(f'{obj_compare(masked_val[1], returned)}'))
+                                                f'{returned}/' + str(obj_compare(masked_val[1], returned)))
                                             finished.append((tmp, returned))
                                         else:
                                             tmp.add_memory("tmp_" + root.obj_headers[l], returned, command,
@@ -783,7 +783,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                                 tmp_new = copy.deepcopy(tmp)
                                                 tmp_new.append_result(
                                                     command,
-                                                    f'{ret_val}/' + str(f'{obj_compare(masked_val[1], ret_val)}'))
+                                                    f'{ret_val}/' + str(obj_compare(masked_val[1], ret_val)))
                                                 finished.append((tmp_new, ret_val))
                                     else:
                                         raise ValueError('error, output of scope')

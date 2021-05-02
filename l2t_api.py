@@ -799,6 +799,13 @@ def fuzzy_comp_inv(t, col, type):
 
 ### for comparison
 # Type: obj
+def safe_obj_compare(obj1, obj2, type):
+    try:
+        return obj_compare(obj1, obj2, type=type)
+    except ExeError:
+        return False
+
+
 def obj_compare(num1, num2, round=False, type="eq"):
     tolerance = 0.15 if round else 1e-9
     # both numeric
