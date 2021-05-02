@@ -459,8 +459,8 @@ non_triggers['fourth'] = ['fourth', '4th']
 non_triggers['fifth'] = ['fifth', '5th']
 non_triggers['last'] = ['last', 'bottom', 'latest', 'most']
 
-non_triggers["filter_greater"] = ['RBR', 'JJR', 'more', 'than', 'above', 'after', 'through', 'to']
-non_triggers["filter_less"] = ['RBR', 'JJR', 'less', 'than', 'below', 'under', 'before', 'through', 'to']
+non_triggers["filter_greater"] = ['RBR', 'JJR', 'more', 'than', 'above', 'after', 'through', 'to', 'between']
+non_triggers["filter_less"] = ['RBR', 'JJR', 'less', 'than', 'below', 'under', 'before', 'through', 'to', 'between']
 non_triggers['less'] = ['RBR', 'JJR', 'less', 'than', 'below', 'under']
 non_triggers['greater'] = ['RBR', 'JJR', 'more', 'than', 'above', 'after', 'exceed', 'over']
 

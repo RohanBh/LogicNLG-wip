@@ -791,7 +791,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                 else:
                     continue
 
-        if len(finished) > 100 or time.time() - start_time > 30:
+        if len(finished) > 100 or time.time() - start_time > 150:
             break
 
     return (name, orig_sent, sent, [_[0].cur_str for _ in finished])
@@ -2035,16 +2035,15 @@ class Parser(object):
                 return new_mem
 
             og_val = (get_old_val(masked_val[0]), masked_val[1])
-            mem_str, mem_num, mem_date = (remove_h(og_val, mem_str),
-                                          remove_h(og_val, mem_num),
-                                          remove_h(og_val, mem_date))
+            mem_str, mem_num, mem_date = (
+                remove_h(og_val, mem_str), remove_h(og_val, mem_num), remove_h(og_val, mem_date))
 
             result = self.run(table_name, raw_sent, masked_sent, pos, mem_str, mem_num,
                               mem_date, head_str, head_num, head_date, masked_val)
             c = list(set(result))
             result = [x for x in c if '/True' in x]
 
-            ret_val = inputs[0], inputs[1], linked_sent, masked_val, mem_num, mem_str, mem_date, len(c), result
+            ret_val = inputs[0], inputs[1], linked_sent, masked_val, mem_str, mem_num, mem_date, len(c), result
 
             with open('tmp/results/{}.json'.format(formatted_sent), 'w') as f:
                 json.dump(ret_val, f, indent=2)
@@ -2085,11 +2084,16 @@ def test_1():
     # print(parse_it("2-13014020-6.html.csv",
     #                "philipp petzschner partnered with j\u00fcrgen melzer "
     #                "for the majority of his tennis doubles tournaments ."))
-    print(parse_it("2-17443121-2.html.csv",
-                   "the episode entitled gary marries off his ex aired seven days after gary gets boundaries ."))
+    # print(parse_it("2-17443121-2.html.csv",
+    #                "the episode entitled gary marries off his ex aired seven days after gary gets boundaries ."))
     # print(parse_it("1-1342233-3.html.csv",
     #                "in the election of 1946 for united states house of representatives ,"
     #                " the incumbent who was first elected the second earliest was frank w boykin ."))
+    # print(parse_it("2-15740721-1.html.csv",
+    #                "1994 was the second year that juraj brestovsk\u00fd won "
+    #                "the men 's singles in the slovak national badminton championships ."))
+    # print(parse_it("2-14202514-1.html.csv",
+    #                "the miami dolphins ' match against detroit lions was the earliest of the 1972 season games ."))
 
     # Warning about regex
     # parse_it("2-12326046-2.html.csv",
