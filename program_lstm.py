@@ -606,6 +606,8 @@ class ProgramTreeBatch:
                     if action_info[0] == 'func':
                         action_idx = self.vocab['actions'][action]
                         action_mask = 1
+                        # avoid nan in softmax
+                        self.generic_copy_mask[curr_ac_ix, pt_id, 0] = 1.
                     else:
                         # It's a copy token
                         sent = self.sent_list[pt_id]
@@ -629,12 +631,18 @@ class ProgramTreeBatch:
                         else:
                             raise ValueError(f"Action {action_info} doesn't match field type {field_type}")
                         self.generic_copy_mask[curr_ac_ix, pt_id, tok_pos_list] = 1.
+                        # avoid nan in softmax trick
+                        if len(tok_pos_list) == 0:
+                            self.generic_copy_mask[curr_ac_ix, pt_id, 0] = 1.
 
                         copy_utterance = '^# ' + action_info[1] + ' #^'
                         copy_utterance_toks = tokenizer.encode(copy_utterance)
                         tok_pos_list = extract2(pt_id, copy_utterance_toks)[1:-1]
                         self.copy_token_idx_mask[curr_ac_ix, pt_id, tok_pos_list] = 1.
                         copy_mask = 1
+                else:
+                    # avoid nan
+                    self.generic_copy_mask[curr_ac_ix, pt_id, 0] = 1.
 
                 func_idx_row.append(action_idx)
                 func_mask_row.append(action_mask)
@@ -1139,7 +1147,7 @@ def init_plstm_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--cuda', action='store_true', default=False, help='Use gpu')
     parser.add_argument('--epoch', default=10, type=int, help="Number of epochs to train the model")
-    parser.add_argument('--batch_size', default=64, type=int, help="The batch size to use during training")
+    parser.add_argument('--batch_size', default=8, type=int, help="The batch size to use during training")
     parser.add_argument('--lr', default=1e-4, type=float, help="Learning Rate of adam")
     parser.add_argument('--every', default=250, type=int, help="Log after every n examples")
     parser.add_argument('--save_every', default=2, type=int, help="Save after every n epochs")
