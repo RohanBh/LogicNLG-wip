@@ -2228,7 +2228,7 @@ def test_2():
 
 
 def test_3(idx=None):
-    parser = Parser("data/all_csv")
+    parser = Parser("data/l2t/all_csv")
 
     with open('data/l2t/train.json', 'r') as f:
         data = json.load(f)
@@ -2344,7 +2344,7 @@ def create_train_data():
 def train_el(num_episodes):
     with open('data/l2t/train_el.json', 'r') as f:
         data = json.load(f)
-    parser = Parser("data/all_csv")
+    parser = Parser("data/l2t/all_csv")
 
     import warnings
     with warnings.catch_warnings():

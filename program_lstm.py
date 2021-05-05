@@ -10,7 +10,8 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from torch import nn, optim
+# noinspection PyUnresolvedReferences
+from torch import nn, optim, autograd
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 from transformers import GPT2Model, GPT2Tokenizer
@@ -373,6 +374,7 @@ class ProgramTree:
         position = False
         position_buf, mention_buf = '', ''
         new_sent = ''
+        tag_ctr = 0
 
         occured_hdrs = set()
         for n in range(len(linked_sent)):
@@ -385,10 +387,13 @@ class ProgramTree:
                     elif i == 0:
                         col_type = col2type[j]
                         occured_hdrs.add(j)
-                        new_sent += f'[HDR_START] {col_type} ^# {cols[j]} #^ [HDR_END]'
+                        new_sent += f'[HDR_START] {col_type} ^# {cols[j]} #^ {"/" * (tag_ctr + 5)} [HDR_END]'
+                        tag_ctr += 1
                     else:
                         col_type = col2type[j]
-                        new_sent += f'[ENT_START] {col_type} ^# {cols[j]} ;;; {mention_buf} #^ [ENT_END]'
+                        new_sent += (f'[ENT_START] {col_type} ^# {cols[j]} ;;; {mention_buf} #^'
+                                     f' {"/" * (tag_ctr + 5)} [ENT_END]')
+                        tag_ctr += 1
 
                     # Reset the buffer
                     position_buf = ""
@@ -413,7 +418,8 @@ class ProgramTree:
             if j in occured_hdrs:
                 continue
             col_type = col2type[j]
-            new_sent += f'[HDR_START] {col_type} ^# {col} #^ [HDR_END], '
+            new_sent += f'[HDR_START] {col_type} ^# {col} #^ {"/" * (tag_ctr + 5)} [HDR_END], '
+            tag_ctr += 1
             flag = True
         if flag:
             new_sent = new_sent[:-2] + ' .'
@@ -439,7 +445,7 @@ class ProgramTree:
                 'twelfth', '12th').replace('thirteenth', '13th').replace('fourteenth', '14th').replace(
                 'fifteenth', '15th')
             if len(re.findall(pat, token)) > 0:
-                reres = re.findall(r'(\d+)(th|nd|rd)', new_sent)
+                reres = re.findall(r'(\d+)(th|nd|rd)', token)
                 if len(reres) == 0:
                     new_tokens.append(token)
                     continue
@@ -449,6 +455,8 @@ class ProgramTree:
                 new_tokens.append('^#')
                 new_tokens.append(str(num))
                 new_tokens.append('#^')
+                new_tokens.append('/' * (tag_ctr + 5))
+                tag_ctr += 1
                 new_tokens.append('[N_END]')
             else:
                 new_tokens.append(token)
@@ -547,25 +555,22 @@ class ProgramTreeBatch:
     def init_index_tensors(self, tokenizer):
         def extract1(pt_id, start_tok, end_tok):
             inside1 = False
-            inside2 = False
+            copy_tok = False
             token_pos_list = []
             for tok_idx, tok in enumerate(self.input_ids[pt_id]):
                 tok = get_val(tok)
                 if tok == self.tokenizer_dict[start_tok]:
                     inside1 = True
                     continue
-                elif tok == self.tokenizer_dict['fval_start_tok'] and inside1:
-                    inside2 = True
-                    continue
                 elif tok == self.tokenizer_dict['fval_end_tok'] and inside1:
-                    inside2 = False
+                    copy_tok = True
                     continue
                 elif tok == self.tokenizer_dict[end_tok]:
                     inside1 = False
                     continue
-                if not inside2:
-                    continue
-                token_pos_list.append(tok_idx)
+                if copy_tok:
+                    token_pos_list.append(tok_idx)
+                    copy_tok = False
             return token_pos_list
 
         def extract2(pt_id, tok_list):
@@ -574,13 +579,13 @@ class ProgramTreeBatch:
             buff_list = []
             while i < len(self.input_ids[pt_id]):
                 curr_tok = self.input_ids[pt_id][i]
-                curr_tok = curr_tok.item() if isinstance(curr_tok, torch.Tensor) else curr_tok
+                curr_tok = get_val(curr_tok)
                 if curr_tok == tok_list[j]:
                     buff_list.append(i)
                     i += 1
                     j += 1
                     if len(buff_list) == len(tok_list):
-                        token_pos_list.extend(buff_list)
+                        token_pos_list.append(get_val(self.input_ids[pt_id][i]))
                         buff_list = []
                         j = 0
                 else:
@@ -598,29 +603,18 @@ class ProgramTreeBatch:
             parent_field_ids = self.get_parent_field_ids(curr_ac_ix)
 
             for pt_id, pt in enumerate(self.program_trees):
-                action_idx = action_mask = copy_mask = 0
+                func_id = func_mask = copy_mask = 0
                 if curr_ac_ix < len(pt.action_list):
                     action = pt.action_list[curr_ac_ix][1]
                     action_info = pt.action_list[curr_ac_ix]
 
                     if action_info[0] == 'func':
-                        action_idx = self.vocab['actions'][action]
-                        action_mask = 1
+                        func_id = self.vocab['actions'][action]
+                        func_mask = 1
                         # avoid nan in softmax
                         self.generic_copy_mask[curr_ac_ix, pt_id, 0] = 1.
                     else:
                         # It's a copy token
-                        sent = self.sent_list[pt_id]
-                        """
-                        'ent_start_tok'
-                        'ent_end_tok'
-                        'hdr_start_tok'
-                        'hdr_end_tok'
-                        'n_start_tok'
-                        'n_end_tok'
-                        'fval_start_tok'
-                        'fval_end_tok'
-                        """
                         field_type = self._get_field_from_id(get_val(parent_field_ids[pt_id]))
                         if field_type == 'n':
                             tok_pos_list = extract1(pt_id, 'n_start_tok', 'n_end_tok')
@@ -644,8 +638,8 @@ class ProgramTreeBatch:
                     # avoid nan
                     self.generic_copy_mask[curr_ac_ix, pt_id, 0] = 1.
 
-                func_idx_row.append(action_idx)
-                func_mask_row.append(action_mask)
+                func_idx_row.append(func_id)
+                func_mask_row.append(func_mask)
                 copy_mask_row.append(copy_mask)
 
             self.func_idx_matrix.append(func_idx_row)
@@ -715,8 +709,11 @@ class ProgramLSTM(nn.Module):
             self.vocab = json.load(fp)
 
         self.tokenizer = GPT2Tokenizer.from_pretrained(gpt_model, padding_side='left')
-        self.tokenizer.add_tokens(['[ENT_START]', '[ENT_END]', '[HDR_START]', '[HDR_END]',
-                                   '^#', '#^', '[TITLE_START]', '[TITLE_END]', '[N_START]', '[N_END]'])
+        new_tokens = ['[ENT_START]', '[ENT_END]', '[HDR_START]', '[HDR_END]',
+                      '^#', '#^', '[TITLE_START]', '[TITLE_END]', '[N_START]', '[N_END]']
+        for i in range(35):
+            new_tokens.append('/' * (i + 5))
+        self.tokenizer.add_tokens(new_tokens)
         if 'gpt2' in gpt_model:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.encoder = GPT2Model.from_pretrained(gpt_model)
@@ -974,7 +971,11 @@ class ProgramLSTM(nn.Module):
 
         # (action_seq_len, batch_size)
         action_prob = target_apply_func_prob * batch.func_mask + target_copy_prob * batch.copy_mask
-        action_prob = action_prob.log()
+        action_mask_pad = torch.eq(batch.func_mask + batch.copy_mask, 0.)
+        action_mask = 1. - action_mask_pad.float()
+        action_prob.data.masked_fill_(action_mask_pad.bool(), 1.e-7)
+        # print('uiop', torch.any(action_prob == 0))
+        action_prob = action_prob.log() * action_mask
         scores = torch.sum(action_prob, dim=0)
         return scores
 
@@ -1054,6 +1055,9 @@ class ProgramLSTM(nn.Module):
                 loss = -ret_val[0]
                 avg_loss += torch.sum(loss).data.item()
                 loss = torch.mean(loss)
+                # with autograd.detect_anomaly():
+                #     loss.backward()
+                #     optimizer.step()
                 loss.backward()
                 optimizer.step()
 
@@ -1075,60 +1079,114 @@ class ProgramLSTM(nn.Module):
 
 
 def test_program_tree():
-    l_str = "hop { nth_argmax { all_rows ; attendance ; 2 } ; home team }=milton keynes dons/True"
-    a1 = ProgramTree.from_str(l_str)
-    print(repr(a1))
-    print(a1.action_list)
-
-    l_str = ("and { eq { nth_min { all_rows ; round ; 3 } ; 3 } ;"
-             " eq { hop { nth_argmin { all_rows ; round ; 3 } ; name } ; scott starks } } = true")
-    a2 = ProgramTree.from_str(l_str)
-    print(repr(a2))
-    print(a2.action_list)
-
-    l_str = ("and { "
-             "only { filter_greater { filter_eq { all_rows ; decision ; labarbera } ; attendance ; 18000 } } ;"
-             " eq { hop { "
-             "filter_greater { filter_eq { all_rows ; decision ; labarbera } ; attendance ; 18000 } ;"
-             " date } ; november 3 } } = true")
-    a3 = ProgramTree.from_str(l_str)
-    print(repr(a3))
-    print(a3.action_list)
-
-    l_str = "greater_str_inv { all_rows ; venue ; belk gymnasium ; closed }=charlotte speedway/True"
-    a4 = ProgramTree.from_str(l_str)
-    print(repr(a4))
-    print(a4.action_list)
-
-    with open('data/logic_form_vocab.json') as fp:
-        vocab = json.load(fp)
-    # b = ProgramTreeDataset([a1, a2, a3, a4], vocab)
-    b = ProgramTreeBatch([a4], vocab)
-    print(b.get_parent_action_ids(5))
-    print(b.get_parent_field_ids(5))
-
-    # ns = ProgramTree.transform_linked_sent(
-    #     '#sap g33k;5,2# be the team with the third highest #team number;0,3# in the #first championship;-1,-1# .',
-    #     pd.read_csv('data/l2t/all_csv/2-15584199-3.html.csv', delimiter="#")
-    # )
-    # print(ns)
-
-    l_str = "hop { nth_argmax { all_rows ; total ; 2 } ; province }=chonburi/True"
-    a5 = ProgramTree.from_str(l_str)
-    print(repr(a5))
-    print(a5.action_list)
-
-    with open('data/logic_form_vocab.json') as fp:
-        vocab = json.load(fp)
-    b = ProgramTreeBatch([a5], vocab)
-    print(b.get_parent_action_ids(5))
-    print(b.get_parent_field_ids(5))
+    # l_str = "hop { nth_argmax { all_rows ; attendance ; 2 } ; home team }=milton keynes dons/True"
+    # a1 = ProgramTree.from_str(l_str)
+    # print(repr(a1))
+    # print(a1.action_list)
+    #
+    # l_str = ("and { eq { nth_min { all_rows ; round ; 3 } ; 3 } ;"
+    #          " eq { hop { nth_argmin { all_rows ; round ; 3 } ; name } ; scott starks } } = true")
+    # a2 = ProgramTree.from_str(l_str)
+    # print(repr(a2))
+    # print(a2.action_list)
+    #
+    # l_str = ("and { "
+    #          "only { filter_greater { filter_eq { all_rows ; decision ; labarbera } ; attendance ; 18000 } } ;"
+    #          " eq { hop { "
+    #          "filter_greater { filter_eq { all_rows ; decision ; labarbera } ; attendance ; 18000 } ;"
+    #          " date } ; november 3 } } = true")
+    # a3 = ProgramTree.from_str(l_str)
+    # print(repr(a3))
+    # print(a3.action_list)
+    #
+    # l_str = "greater_str_inv { all_rows ; venue ; belk gymnasium ; closed }=charlotte speedway/True"
+    # a4 = ProgramTree.from_str(l_str)
+    # print(repr(a4))
+    # print(a4.action_list)
+    #
+    # with open('data/logic_form_vocab.json') as fp:
+    #     vocab = json.load(fp)
+    # # b = ProgramTreeDataset([a1, a2, a3, a4], vocab)
+    # b = ProgramTreeBatch([a4], vocab)
+    # print(b.get_parent_action_ids(5))
+    # print(b.get_parent_field_ids(5))
+    #
+    # # ns = ProgramTree.transform_linked_sent(
+    # #     '#sap g33k;5,2# be the team with the third highest #team number;0,3# in the #first championship;-1,-1# .',
+    # #     pd.read_csv('data/l2t/all_csv/2-15584199-3.html.csv', delimiter="#")
+    # # )
+    # # print(ns)
+    #
+    # l_str = "hop { nth_argmax { all_rows ; total ; 2 } ; province }=chonburi/True"
+    # a5 = ProgramTree.from_str(l_str)
+    # print(repr(a5))
+    # print(a5.action_list)
+    #
+    # with open('data/logic_form_vocab.json') as fp:
+    #     vocab = json.load(fp)
+    # b = ProgramTreeBatch([a5], vocab)
+    # print(b.get_parent_action_ids(5))
+    # print(b.get_parent_field_ids(5))
 
     # ns = ProgramTree.transform_linked_sent(
     #     '#chonburi;2,1# receive the 2nd highest #total;0,5# medal count in the #2008 thailand national game;-1,-1# .',
     #     pd.read_csv('data/l2t/all_csv/2-14892957-1.html.csv', delimiter="#")
     # )
     # print(ns)
+
+    # l_str = "hop { nth_argmax { all_rows ; silver ; 2 } ; province }=chonburi/True"
+    # a5 = ProgramTree.from_str(l_str,
+    #                           '#chonburi;4,1# #province;0,1# win the second highest amount'
+    #                           ' of #silver;0,3# medal in the #2009 thailand national game;-1,-1# .',
+    #                           [
+    #                               "rank",
+    #                               "province",
+    #                               "gold",
+    #                               "silver",
+    #                               "bronze",
+    #                               "total"
+    #                           ],
+    #                           {
+    #                               0: "num",
+    #                               1: "str",
+    #                               2: "num",
+    #                               3: "num",
+    #                               4: "num",
+    #                               5: "num"
+    #                           }
+    #                           )
+    # print(repr(a5))
+    # print(a5.sent)
+    # print(a5.action_list)
+
+    l_str = "hop { nth_argmin { all_rows ; length ; 2 } ; line }=sofia - dragoman/True"
+    a5 = ProgramTree.from_str(l_str,
+                              'the second shortest #speed rail in europe;-1,-1# be the'
+                              ' #sofia - dragoman;6,0# #line;0,0# .',
+                              [
+                                  "line",
+                                  "speed",
+                                  "length",
+                                  "construction begun",
+                                  "expected start of revenue services"
+                              ],
+                              {
+                                  0: "str",
+                                  1: "num",
+                                  2: "num",
+                                  3: "num",
+                                  4: "num"
+                              }
+                              )
+    print(repr(a5))
+    print(a5.sent)
+    print(a5.action_list)
+
+    # with open('data/logic_form_vocab.json') as fp:
+    #     vocab = json.load(fp)
+    # b = ProgramTreeBatch([a5], vocab)
+    # print(b.get_parent_action_ids(5))
+    # print(b.get_parent_field_ids(5))
     return
 
 
