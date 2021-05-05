@@ -585,7 +585,7 @@ class ProgramTreeBatch:
                     i += 1
                     j += 1
                     if len(buff_list) == len(tok_list):
-                        token_pos_list.append(get_val(self.input_ids[pt_id][i]))
+                        token_pos_list.append(i)
                         buff_list = []
                         j = 0
                 else:
@@ -631,7 +631,7 @@ class ProgramTreeBatch:
 
                         copy_utterance = '^# ' + action_info[1] + ' #^'
                         copy_utterance_toks = tokenizer.encode(copy_utterance)
-                        tok_pos_list = extract2(pt_id, copy_utterance_toks)[1:-1]
+                        tok_pos_list = extract2(pt_id, copy_utterance_toks)
                         self.copy_token_idx_mask[curr_ac_ix, pt_id, tok_pos_list] = 1.
                         copy_mask = 1
                 else:
