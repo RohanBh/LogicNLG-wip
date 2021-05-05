@@ -646,10 +646,10 @@ class ProgramTreeBatch:
 
         T = torch.cuda if self.cuda else torch
         self.func_idx_matrix = T.LongTensor(self.func_idx_matrix)
-        self.func_mask = T.FloatTensor(self.func_mask)
-        self.copy_mask = T.FloatTensor(self.copy_mask)
-        self.copy_token_idx_mask = torch.from_numpy(self.copy_token_idx_mask)
-        self.generic_copy_mask = torch.from_numpy(self.generic_copy_mask)
+        self.func_mask = T.FloatTensor(self.func_mask).bool()
+        self.copy_mask = T.FloatTensor(self.copy_mask).bool()
+        self.copy_token_idx_mask = torch.from_numpy(self.copy_token_idx_mask).bool()
+        self.generic_copy_mask = torch.from_numpy(self.generic_copy_mask).bool()
         if self.cuda:
             self.copy_token_idx_mask = self.copy_token_idx_mask.cuda()
             self.generic_copy_mask = self.generic_copy_mask.cuda()
@@ -682,7 +682,7 @@ class PointerNet(nn.Module):
         weights = weights.permute(1, 0, 2)
 
         # (action_seq_len, batch_size, seq_len)
-        weights.data.masked_fill_(copy_token_mask, -float('inf'))
+        weights.data.masked_fill_(~copy_token_mask, -float('inf'))
 
         # (action_seq_len, batch_size, seq_len)
         ptr_weights = F.softmax(weights, dim=-1)
@@ -768,13 +768,13 @@ class ProgramLSTM(nn.Module):
         :param h_t: curr_hidden_state - (batch_size, decoder_hidden_size)
         :param sent_encoding: (batch_size, seq_len, encoder_hidden_size)
         :param transformed_sent_encodings: (batch_size, seq_len, decoder_hidden_size)
-        :param mask: (batch_size, seq_len)
+        :param mask: (batch_size, seq_len) indicating which values are not pad tokens
         """
         # attn_weight - (batch_size, seq_len)
         # bmm multiplies two tensors: b,m,p with b,p,n to get b,m,n
         attn_weight = torch.bmm(transformed_sent_encodings, h_t.unsqueeze(2)).squeeze(2)
         if mask is not None:
-            attn_weight.data.masked_fill_(mask, -float('inf'))
+            attn_weight.data.masked_fill_(~mask, -float('inf'))
         # softmax over last dim of seq_len size
         attn_weight = F.softmax(attn_weight, dim=-1)
 
@@ -795,12 +795,17 @@ class ProgramLSTM(nn.Module):
 
         """
         # padded_sequences = self.tokenizer(sent_list, padding=True, truncation=True, return_tensors="pt")
-        encoder_output = self.encoder(**padded_sequences)
+        if self.device != torch.device('cpu'):
+            # (batch_size, seq_len)
+            input_ids = padded_sequences['input_ids'].cuda()
+            mask = padded_sequences['attention_mask'].cuda()
+        else:
+            input_ids = padded_sequences['input_ids']
+            mask = padded_sequences['attention_mask']
+        encoder_output = self.encoder(input_ids=input_ids, attention_mask=mask)
         # (batch_size, seq_len, encoder_hidden_size)
         hidden_states = encoder_output.last_hidden_state
-        # (batch_size, seq_len)
-        mask = padded_sequences['attention_mask']
-        return hidden_states, mask
+        return hidden_states, mask.bool()
 
     def init_decoder_state(self, enc_last_state):
         """
@@ -1026,7 +1031,7 @@ class ProgramLSTM(nn.Module):
             start_epoch = checkpoint['epochs_finished'] + 1
             # scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
-        tb_writer = SummaryWriter(log_dir=f'tensorboard/p-lstm-{recording_time}')
+        tb_writer = SummaryWriter(log_dir=f'tensorboard/p-lstm')
         model.train()
 
         for epoch_idx in range(start_epoch, args.epoch):
