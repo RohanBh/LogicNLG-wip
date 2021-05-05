@@ -1,5 +1,6 @@
 import argparse
 import json
+# noinspection PyUnresolvedReferences
 import random
 import re
 from collections import Counter
@@ -259,8 +260,46 @@ class ProgramTree:
         self.sent = ProgramTree.transform_linked_sent(linked_sent, cols, col2type)
         self._actions = None
 
-    def execute(self):
-        pass
+    @staticmethod
+    def fix_linked_sent(linked_sent, all_entities, cols):
+        inside = False
+        position = False
+        position_buf, mention_buf = '', ''
+        new_sent = ''
+        ent2sat = {str(e[1]): False for e in all_entities}
+
+        for n in range(len(linked_sent)):
+            if linked_sent[n] == '#':
+                if position:
+                    # i = int(split(position_buf, "row"))
+                    # j = int(split(position_buf, "col"))
+                    ent2sat[mention_buf] = True
+
+                    # Reset the buffer
+                    position_buf = ""
+                    mention_buf = ""
+                    inside = False
+                    position = False
+                else:
+                    inside = True
+            elif linked_sent[n] == ';':
+                position = True
+            else:
+                if position:
+                    position_buf += linked_sent[n]
+                elif inside:
+                    mention_buf += linked_sent[n]
+                else:
+                    # non-linked words
+                    new_sent += linked_sent[n]
+
+        if not all(ent2sat.values()):
+            for e in all_entities:
+                if ent2sat[str(e[1])]:
+                    continue
+                if (isinstance(e[1], int) or isinstance(e[1], float)) and e[1] > 20:
+                    linked_sent = linked_sent.replace(str(e[1]), f'#{e[1]};2,{cols.index(e[0])}#')
+        return linked_sent
 
     @property
     def action_list(self):
@@ -418,7 +457,7 @@ class ProgramTree:
             if j in occured_hdrs:
                 continue
             col_type = col2type[j]
-            new_sent += f'[HDR_START] {col_type} ^# {col} #^ {"/" * (tag_ctr + 5)} [HDR_END], '
+            new_sent += f'[HDR_START] {col_type} ^# {col} #^ {"/" * (tag_ctr + 5)} [HDR_END] , '
             tag_ctr += 1
             flag = True
         if flag:
@@ -975,8 +1014,8 @@ class ProgramLSTM(nn.Module):
         action_mask = 1. - action_mask_pad.float()
         action_prob.data.masked_fill_(action_mask_pad.bool(), 1.e-7)
         if torch.any(action_prob == 0):
-            print("Action prob 0")
-        action_prob.data.masked_fill_(action_prob == 0, 1.e-7)
+            # print("Action prob 0")
+            action_prob.data.masked_fill_(action_prob == 0, 1.e-7)
         # print('uiop', torch.any(action_prob == 0))
         action_prob = action_prob.log() * action_mask
         scores = torch.sum(action_prob, dim=0)
@@ -1056,9 +1095,16 @@ class ProgramLSTM(nn.Module):
 
         all_programs = []
         for entry in data:
+            linked_sent = entry[2]
+            try:
+                all_ents = [entry[4], entry[5], entry[6]]
+                all_ents = [tuple(y) for x in all_ents for y in x]
+                linked_sent = ProgramTree.fix_linked_sent(linked_sent, all_ents, entry[7])
+            except:
+                pass
             for prog in entry[-1]:
                 col2type = {int(k): v for k, v in entry[-2].items()}
-                all_programs.append(ProgramTree.from_str(prog, entry[2], entry[-3], col2type))
+                all_programs.append(ProgramTree.from_str(prog, linked_sent, entry[-3], col2type))
 
         recording_time = datetime.now().strftime('%m_%d_%H_%M')
         optimizer = optim.Adam(model.parameters(), args.lr)
@@ -1193,23 +1239,49 @@ def test_program_tree():
     # print(a5.sent)
     # print(a5.action_list)
 
-    l_str = "hop { nth_argmin { all_rows ; length ; 2 } ; line }=sofia - dragoman/True"
+    # l_str = "hop { nth_argmin { all_rows ; length ; 2 } ; line }=sofia - dragoman/True"
+    # a5 = ProgramTree.from_str(l_str,
+    #                           'the second shortest #speed rail in europe;-1,-1# be the'
+    #                           ' #sofia - dragoman;6,0# #line;0,0# .',
+    #                           [
+    #                               "line",
+    #                               "speed",
+    #                               "length",
+    #                               "construction begun",
+    #                               "expected start of revenue services"
+    #                           ],
+    #                           {
+    #                               0: "str",
+    #                               1: "num",
+    #                               2: "num",
+    #                               3: "num",
+    #                               4: "num"
+    #                           }
+    #                           )
+    # print(repr(a5))
+    # print(a5.sent)
+    # print(a5.action_list)
+
+    l_str = ("greater_str_inv { all_rows ; artist ; dire straits ;"
+             " release - year of first charted record }=barbra streisand/True")
     a5 = ProgramTree.from_str(l_str,
-                              'the second shortest #speed rail in europe;-1,-1# be the'
-                              ' #sofia - dragoman;6,0# #line;0,0# .',
+                              '#best - selling music artist;-1,-1# #dire straits;16,0# have '
+                              'less #claimed sales;0,5# than #barbra streisand;8,0# .',
                               [
-                                  "line",
-                                  "speed",
-                                  "length",
-                                  "construction begun",
-                                  "expected start of revenue services"
+                                  "artist",
+                                  "country of origin",
+                                  "period active",
+                                  "release - year of first charted record",
+                                  "genre",
+                                  "claimed sales"
                               ],
                               {
-                                  0: "str",
-                                  1: "num",
+                                  0: "num",
+                                  1: "str",
                                   2: "num",
                                   3: "num",
-                                  4: "num"
+                                  4: "str",
+                                  5: "num"
                               }
                               )
     print(repr(a5))
@@ -1257,3 +1329,5 @@ if __name__ == '__main__':
     # tmp_test()
     args = init_plstm_arg_parser()
     ProgramLSTM.train_program_lstm(args)
+    # 177, 202, 272, 301, 363, 364, 383
+    # print(get_entry(177))
