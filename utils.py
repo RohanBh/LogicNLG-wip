@@ -1,7 +1,70 @@
 from itertools import chain, combinations
 
+import numpy as np
 import torch
 import torch.nn.functional as F
+
+
+def plotCDF(ax, data, order, xlabel, ylabel, Xmax='N/A', Xmin='N/A',
+            labels=None, isLog=False, set_legend=True, color_n_linestyle_dicts=None):
+    raw = {}
+    markers = ['o', '*', '^', '1', '4', 's', 'd', '3', 'd', 'o', '*', '^']
+
+    # To determine to plotting order
+    if labels is None:
+        labels = order
+
+    for key in sorted(labels):
+        # print key, data.keys()
+        raw[key] = list(data[key])
+        if len(raw[key]) == 0:
+            continue
+
+        elms, cts = np.unique(raw[key], return_counts=True)
+        cdf = np.cumsum(cts)
+        cdf = cdf / cdf[-1]
+        kwargs_dict = (get_color_and_linestyle_kwargs(key) if color_n_linestyle_dicts is None
+                       else color_n_linestyle_dicts[key])
+        ax.step(list(elms[:1]) + list(elms), [0] + list(cdf), where='post',
+                label=labels[key], **kwargs_dict)
+
+    # pl.legend((p),legnd,'lower right')
+    if len(labels) > 1 and set_legend:
+        set_legend_to_right(ax)
+
+    change_plot_params(ax, xlabel, ylabel, Xmin, Xmax, is_x_log=isLog)
+    ax.set_ylim(ymax=1.0)
+    ax.set_ylim(ymin=0.0)
+    return
+
+
+def change_plot_params(ax, xlabel, ylabel, Xmin, Xmax, is_x_log=False, is_y_log=False):
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    if is_x_log:
+        ax.set_xscale('log')
+    if is_y_log:
+        ax.set_yscale('log')
+    if Xmin != 'N/A':
+        ax.set_xlim(xmin=Xmin)
+    if Xmax != 'N/A':
+        ax.set_xlim(xmax=Xmax)
+    ax.grid(True)
+    # ax.tight_layout()
+
+
+def set_legend_to_right(ax):
+    # ax.legend(loc='lower right')
+    box = ax.get_position()
+    ax.set_position([box.x0, box.y0, box.width * 0.98, box.height])
+    # Put a legend to the right of the current axis
+    ax.legend(loc='center left', bbox_to_anchor=(1.05, 0.5))
+
+
+def get_color_and_linestyle_kwargs(i):
+    color_n = ['r', 'b', 'k', 'g', 'm', 'c', 'y']
+    linestyles = ['-', '--', ':', '-.']
+    return {'color': color_n[i % len(color_n)], 'linestyle': linestyles[i % len(linestyles)]}
 
 
 def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float('Inf')):

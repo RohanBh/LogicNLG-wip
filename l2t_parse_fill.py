@@ -817,6 +817,33 @@ def augment(s):
     elif 'sixth' in s:
         s.append("6th")
         recover_dict[s[-1]] = 'sixth'
+    elif 'seventh' in s:
+        s.append("7th")
+        recover_dict[s[-1]] = 'seventh'
+    elif 'eighth' in s:
+        s.append("8th")
+        recover_dict[s[-1]] = 'eighth'
+    elif 'ninth' in s:
+        s.append("9th")
+        recover_dict[s[-1]] = 'ninth'
+    elif 'tenth' in s:
+        s.append("10th")
+        recover_dict[s[-1]] = 'tenth'
+    elif 'eleventh' in s:
+        s.append("11th")
+        recover_dict[s[-1]] = 'eleventh'
+    elif 'twelfth' in s:
+        s.append("12th")
+        recover_dict[s[-1]] = 'twelfth'
+    elif 'thirteenth' in s:
+        s.append("13th")
+        recover_dict[s[-1]] = 'thirteenth'
+    elif 'fourteenth' in s:
+        s.append("14th")
+        recover_dict[s[-1]] = 'fourteenth'
+    elif 'fifteenth' in s:
+        s.append("15th")
+        recover_dict[s[-1]] = 'fifteenth'
 
     for i in range(1, 10):
         if "0" + str(i) in s:
@@ -1581,7 +1608,9 @@ class Parser(object):
                 pat = r'\d(th|nd|rd)'
                 _ = _.replace('first', '1st').replace('second', '2nd').replace('third', '3rd').replace(
                     'fourth', '4th').replace('fifth', '5th').replace('sixth', '6th').replace('seventh', '7th').replace(
-                    'eighth', '8th').replace('ninth', '9th')
+                    'eighth', '8th').replace('ninth', '9th').replace('tenth', '10th').replace(
+                    'eleventh', '11th').replace('twelfth', '12th').replace('thirteenth', '13th').replace(
+                    'fourteenth', '14th').replace('fifteenth', '15th')
                 if len(re.findall(pat, _)) > 0:
                     reres = re.findall(r'(\d+)(th|nd|rd)', _)
                     if len(reres) == 0:
