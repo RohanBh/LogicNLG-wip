@@ -1,12 +1,17 @@
+import argparse
 import json
+import random
 import re
+from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from torch import nn
+from torch import nn, optim
+from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 from transformers import GPT2Model, GPT2Tokenizer
 
@@ -82,35 +87,91 @@ def _get_must_haves(parser, og_sent, table_name, linked_sent):
     return must_have
 
 
-def inc_precision():
+def inc_precision(thresh=3):
     with open('data/programs.json') as fp:
         data = json.load(fp)
 
     parser = Parser("data/l2t/all_csv")
+
+    def get_all_headers(logic_json):
+        func = logic_json['func']
+        all_headers = []
+        if func in APIs:
+            all_hdr_args = [aidx for aidx, a in enumerate(APIs[func]['argument']) if 'header' in a]
+            if len(all_hdr_args) > 0:
+                fargs = [arg.split(';;;') if isinstance(arg, str) else [arg] for arg in logic_json['args']]
+                fargs = [y for x in fargs for y in x]
+                all_headers.extend(fargs[i] for i in all_hdr_args)
+        for arg in logic_json['args']:
+            if isinstance(arg, dict):
+                all_headers.extend(get_all_headers(arg))
+        return all_headers
+
+    def get_new_entry(en, cl, c2t):
+        return *en[:7], cl, c2t, en[-1]
+
+    def get_linked_hdrs(linked_sent, cols):
+        inside = False
+        position = False
+        position_buf, mention_buf = '', ''
+        new_sent = ''
+        occured_hdrs = set()
+        for n in range(len(linked_sent)):
+            if linked_sent[n] == '#':
+                if position:
+                    i = int(split(position_buf, "row"))
+                    j = int(split(position_buf, "col"))
+                    if j != -1:
+                        occured_hdrs.add(cols[j])
+
+                    # Reset the buffer
+                    position_buf = ""
+                    mention_buf = ""
+                    inside = False
+                    position = False
+                else:
+                    inside = True
+            elif linked_sent[n] == ';':
+                position = True
+            else:
+                if position:
+                    position_buf += linked_sent[n]
+                elif inside:
+                    mention_buf += linked_sent[n]
+                else:
+                    # non-linked words
+                    new_sent += linked_sent[n]
+        return occured_hdrs
 
     # table_name, og_sent, linked_sent, masked_val, mem_str, mem_num, mem_date, len(c), result
     new_data = []
     for entry in tqdm(data):
         if entry is None:
             continue
+        all_programs_list = []
         programs = entry[-1]
+        table = pd.read_csv(f'data/l2t/all_csv/{entry[0]}', delimiter="#")
+        col2type = get_col_types(table)
+        cols = table.columns.tolist()
         if len(programs) == 0:
             continue
         if len(programs) == 1:
-            new_data.append(entry)
+            new_data.append(get_new_entry(entry, cols, col2type))
             continue
         # do trigger-word based filtering to remove false positives
-        # og_sent, table_name, linked_sent, raw_sent
         must_have_list = _get_must_haves(parser, entry[1], entry[0], entry[2])
 
-        new_program_list = [p for p in programs if any([f'{mh} {{' in p for mh in must_have_list])]
-        if len(new_program_list) == 1:
-            new_data.append((*entry[:-1], new_program_list))
-            continue
+        new_program_list = [p_ix for p_ix, p in enumerate(programs) if any([f'{mh} {{' in p for mh in must_have_list])]
+        # if len(new_program_list) == 1:
+        #     new_data.append((*get_new_entry(entry, cols, col2type)[:-1], new_program_list))
+        #     continue
+        all_programs_list.append(new_program_list)
 
-        new_program_list = [p for p in programs if all([f'{mh} {{' in p for mh in must_have_list])]
-        if len(new_program_list) == 1:
-            new_data.append((*entry[:-1], new_program_list))
+        new_program_list = [p_ix for p_ix, p in enumerate(programs) if all([f'{mh} {{' in p for mh in must_have_list])]
+        # if len(new_program_list) == 1:
+        #     new_data.append((*get_new_entry(entry, cols, col2type)[:-1], new_program_list))
+        #     continue
+        all_programs_list.append(new_program_list)
 
         # Do filtering based on used arguments
         # Ideas:
@@ -118,9 +179,67 @@ def inc_precision():
         # 2. Select the ones which rely only on the headers present in the sent except for the generator header
         # 3. Select the ones which use the mask_header as the generator header
         # 4. In case of max { all_rows ; header } and hop { argmax { all_row ; header} ; header } choose first.
+        # 5. Select the ones which generate the full str output instead of just the int part
+        # 6. Select the ones which rely on nth_arg if present
+        program_trees = [ProgramTree.from_str(p_str) for p_str in programs]
+        msk_header = entry[3][0][4:]
+        if msk_header == 'input':
+            # select the count funcs
+            new_program_list = [p_ix for p_ix, p in enumerate(programs) if 'count {' in p]
+            all_programs_list.append(new_program_list)
+        else:
+            # Select the func which has the correct generating header
+            new_program_list = []
+            for pt_idx, pt in enumerate(program_trees):
+                lj = pt.logic_json
+                func, fargs = lj['func'], lj['args']
+                fargs = [arg.split(';;;') if isinstance(arg, str) else [arg] for arg in fargs]
+                fargs = [y for x in fargs for y in x]
+                all_hdr_args = [aidx for aidx, a in enumerate(APIs[func]['argument']) if 'header' in a]
+                if len(all_hdr_args) > 0:
+                    harg_idx = all_hdr_args[0]
+                    hval = fargs[harg_idx]
+                    if hval == msk_header:
+                        new_program_list.append(pt_idx)
+            all_programs_list.append(new_program_list)
 
-        if len(programs) <= 5:
-            new_data.append(entry)
+        # Select the ones which rely only on linked headers
+        new_program_list = []
+        for pt_idx, pt in enumerate(program_trees):
+            all_used_hdrs = set(get_all_headers(pt.logic_json))
+            linked_hdrs = get_linked_hdrs(entry[2], cols)
+            if len(all_used_hdrs - linked_hdrs) == 0:
+                new_program_list.append(pt_idx)
+        all_programs_list.append(new_program_list)
+
+        # Select the ones which generate the full str
+        new_program_list = []
+        for p_ix, prog in enumerate(programs):
+            ret_val = prog[prog.rfind('=') + 1:-5]
+            if ret_val == entry[3]:
+                new_program_list.append(p_ix)
+        all_programs_list.append(new_program_list)
+
+        # Select the ones which rely on nth_arg if present
+        if any(msk_num for msk_num in entry[5] if msk_num[0] == 'ntharg'):
+            ordinal_funcs = ['nth_max {', 'nth_argmin {', 'nth_argmax {', 'nth_min {']
+            new_program_list = [p_ix for p_ix, p in enumerate(programs) if any(f in p for f in ordinal_funcs)]
+            all_programs_list.append(new_program_list)
+
+        # filter based on count
+        pix_ctr = Counter(y for x in all_programs_list for y in x)
+        if len(pix_ctr) == 0 and len(programs) <= thresh:
+            new_data.append(get_new_entry(entry, cols, col2type))
+            continue
+        elif len(pix_ctr) == 0:
+            continue
+        max_count = max([v for k, v in pix_ctr.items()])
+        chosen_pix_list = [k for k, v in pix_ctr.items() if v == max_count]
+        new_program_list = [programs[pix] for pix in chosen_pix_list]
+        if len(new_program_list) <= thresh:
+            new_data.append((*get_new_entry(entry, cols, col2type)[:-1], new_program_list))
+        # if len(programs) <= 5:
+        #     new_data.append(get_new_entry(entry, cols, col2type))
         continue
 
     with open("data/programs_filtered.json", 'w') as f:
@@ -128,13 +247,15 @@ def inc_precision():
     return
 
 
+def get_val(pos_tensor):
+    return pos_tensor.item() if isinstance(pos_tensor, torch.Tensor) else pos_tensor
+
+
 class ProgramTree:
-    def __init__(self, logic_json, sent=None, table=None):
+    def __init__(self, logic_json, linked_sent=None, cols=None, col2type=None):
         self.func = logic_json['func']
-        self.args = [ProgramTree(a) if isinstance(a, dict) else a for a in logic_json['args']]
         self.logic_json = logic_json
-        self.table = table
-        self.sent = ProgramTree.transform_linked_sent(sent, table)
+        self.sent = ProgramTree.transform_linked_sent(linked_sent, cols, col2type)
         self._actions = None
 
     def execute(self):
@@ -166,8 +287,8 @@ class ProgramTree:
         return self._actions
 
     @classmethod
-    def from_str(cls, logic_str):
-        return ProgramTree(ProgramTree.get_logic_json_from_str(logic_str))
+    def from_str(cls, logic_str, linked_sent=None, cols=None, col2type=None):
+        return cls(cls.get_logic_json_from_str(logic_str), linked_sent, cols, col2type)
 
     @staticmethod
     def _sanitize(logic_json):
@@ -235,7 +356,7 @@ class ProgramTree:
         return ProgramTree._sanitize(ProgramTree._get_logic_json_from_str(logic_str)[0])
 
     @staticmethod
-    def transform_linked_sent(linked_sent, table):
+    def transform_linked_sent(linked_sent, cols, col2type):
         """
         e.g. linked sent:
         #philipp petzschner;-1,-1# #partner;0,3# with #jürgen melzer;7,3# for the majority
@@ -245,15 +366,14 @@ class ProgramTree:
         ^# title ; philipp petzschner #^ ^# type , col , partner #^ with blah blah . The columns are: column1 of type1
         with entry like e, {repeat}...
         """
-        if linked_sent is None or table is None:
+        if any(x is None for x in [linked_sent, cols, col2type]):
             return None
         inside = False
         # whether at the index part of the linked entity
         position = False
         position_buf, mention_buf = '', ''
         new_sent = ''
-        col2type = get_col_types(table)
-        cols = table.columns
+
         occured_hdrs = set()
         for n in range(len(linked_sent)):
             if linked_sent[n] == '#':
@@ -341,17 +461,17 @@ class ProgramTree:
         return json.dumps(self.logic_json)
 
 
-class ProgramTreeDataset:
-    def __init__(self, programs_trees, vocab, tokenizer=None, cuda=False):
+class ProgramTreeBatch:
+    def __init__(self, program_trees, vocab, tokenizer=None, cuda=False):
         # take some training files as input
         # This class needs to provide:
         # give the parent-action of another action
         # give the field-type of the action indexed by dfs order. The field type will come from the parent
-        self.programs_trees = programs_trees
+        self.program_trees = program_trees
         self.vocab = vocab
         self.cuda = cuda
-        self.max_num_actions = max(len(p.action_list) for p in self.programs_trees)
-        self.sent_list = [p.sent for p in self.programs_trees if p.sent is not None]
+        self.max_num_actions = max(len(p.action_list) for p in self.program_trees)
+        self.sent_list = [p.sent for p in self.program_trees if p.sent is not None]
         if tokenizer is not None:
             self.padded_sequences = tokenizer(self.sent_list, padding=True, truncation=True, return_tensors="pt")
             # of shape (batch_size, seq_len)
@@ -385,11 +505,11 @@ class ProgramTreeDataset:
             self.init_index_tensors(tokenizer)
 
     def __len__(self):
-        return len(self.programs_trees)
+        return len(self.program_trees)
 
     def get_parent_action_ids(self, curr_idx):
         ids = []
-        for pt in self.programs_trees:
+        for pt in self.program_trees:
             if curr_idx < len(pt.action_list):
                 parent_action_idx = pt.action_list[curr_idx][-1]
                 if parent_action_idx != -1:
@@ -404,7 +524,7 @@ class ProgramTreeDataset:
 
     def get_parent_field_ids(self, curr_idx):
         ids = []
-        for pt in self.programs_trees:
+        for pt in self.program_trees:
             if curr_idx < len(pt.action_list):
                 parent_action_idx = pt.action_list[curr_idx][-1]
                 if parent_action_idx != -1:
@@ -430,7 +550,7 @@ class ProgramTreeDataset:
             inside2 = False
             token_pos_list = []
             for tok_idx, tok in enumerate(self.input_ids[pt_id]):
-                tok = tok.item() if isinstance(tok, torch.Tensor) else tok
+                tok = get_val(tok)
                 if tok == self.tokenizer_dict[start_tok]:
                     inside1 = True
                     continue
@@ -464,6 +584,8 @@ class ProgramTreeDataset:
                         buff_list = []
                         j = 0
                 else:
+                    if len(buff_list) == 0:
+                        i += 1
                     buff_list = []
                     j = 0
             return token_pos_list
@@ -475,14 +597,14 @@ class ProgramTreeDataset:
             # of size (batch,)
             parent_field_ids = self.get_parent_field_ids(curr_ac_ix)
 
-            for pt_id, pt in enumerate(self.programs_trees):
+            for pt_id, pt in enumerate(self.program_trees):
                 action_idx = action_mask = copy_mask = 0
                 if curr_ac_ix < len(pt.action_list):
                     action = pt.action_list[curr_ac_ix][1]
                     action_info = pt.action_list[curr_ac_ix]
 
                     if action_info[0] == 'func':
-                        action_idx = self.vocab['action'][action]
+                        action_idx = self.vocab['actions'][action]
                         action_mask = 1
                     else:
                         # It's a copy token
@@ -497,7 +619,7 @@ class ProgramTreeDataset:
                         'fval_start_tok'
                         'fval_end_tok'
                         """
-                        field_type = self._get_field_from_id(parent_field_ids[pt_id])
+                        field_type = self._get_field_from_id(get_val(parent_field_ids[pt_id]))
                         if field_type == 'n':
                             tok_pos_list = extract1(pt_id, 'n_start_tok', 'n_end_tok')
                         elif 'header' in field_type:
@@ -573,14 +695,14 @@ class ProgramLSTM(nn.Module):
     """
 
     def __init__(self, action_embed_size, field_embed_size, decoder_hidden_size,
-                 attn_vec_size, dropout, device='cpu', gpt_model='gpt2'):
+                 attn_vec_size, dropout, device_str='cpu', gpt_model='gpt2'):
         super(ProgramLSTM, self).__init__()
         self.action_embed_size = action_embed_size
         self.attn_vec_size = attn_vec_size
         self.field_embed_size = field_embed_size
         self.decoder_hidden_size = decoder_hidden_size
         self.gpt_model = gpt_model
-        self.device = torch.device(device) if isinstance(device, str) else device
+        self.device = torch.device(device_str)
         with open('data/logic_form_vocab.json') as fp:
             self.vocab = json.load(fp)
 
@@ -593,7 +715,7 @@ class ProgramLSTM(nn.Module):
         self.encoder.resize_token_embeddings(len(self.tokenizer))
         # encoder_hidden_size = self.encoder.config.hidden_size
         encoder_hidden_size = self.encoder.config.n_embd
-        self.encoder.to(device)
+        self.encoder.to(self.device)
 
         # embedding for funcs
         self.action_embed = nn.Embedding(len(self.vocab['actions']), action_embed_size)
@@ -632,7 +754,7 @@ class ProgramLSTM(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-        if device != 'cpu':
+        if device_str != 'cpu':
             self.new_long_tensor = torch.cuda.LongTensor
             self.new_tensor = torch.cuda.FloatTensor
         else:
@@ -766,7 +888,7 @@ class ProgramLSTM(nn.Module):
                         if prev_action[0] == 'func':
                             prev_action_embed = self.action_embed.weight[self.vocab['actions'][prev_action[1]]]
                         else:
-                            raise ValueError(f"Wrong previous action type: {prev_action} in tree {program_tree}")
+                            prev_action_embed = zero_action_embed
                     else:
                         prev_action_embed = zero_action_embed
 
@@ -815,7 +937,7 @@ class ProgramLSTM(nn.Module):
         # 3. copy_mask (action_seq_len, batch_size) is equal to negation of func_mask
         # 4. copy_token_idx_mask (action_seq_len, batch_size, seq_len) stores
         #    a bool indicating which tokens should be copied
-        batch = ProgramTreeDataset(program_trees, self.vocab, self.tokenizer, cuda=self.device != 'cpu')
+        batch = ProgramTreeBatch(program_trees, self.vocab, self.tokenizer, cuda=self.device != torch.device('cpu'))
         sent_encodings, pad_masks = self.encode(batch.padded_sequences)
         dec_init_vec = self.init_decoder_state(sent_encodings[:, -1, :])
         # query_vectors are attention hidden states h_t~ of the decoder
@@ -857,13 +979,13 @@ class ProgramLSTM(nn.Module):
 
     @classmethod
     def load(cls, model_path, cuda=False):
-        device = 'cuda' if cuda else 'cpu'
-        params = torch.load(model_path, map_location=torch.device(device))
+        device_str = 'cuda' if cuda else 'cpu'
+        params = torch.load(model_path, map_location=torch.device(device_str))
         (action_embed_size, field_embed_size, decoder_hidden_size,
          attn_vec_size, dropout, gpt_model) = params['args']
 
         plstm = cls(action_embed_size, field_embed_size, decoder_hidden_size,
-                    attn_vec_size, dropout, device, gpt_model)
+                    attn_vec_size, dropout, device_str, gpt_model)
         saved_state = params['state_dict']
         plstm.load_state_dict(saved_state)
         if cuda:
@@ -871,27 +993,93 @@ class ProgramLSTM(nn.Module):
         plstm.eval()
         return plstm
 
+    @staticmethod
+    def train_program_lstm(args):
+        print(args)
+        save_path = Path('plstm_models/')
+        save_path.mkdir(exist_ok=True)
+        device_str = 'cuda' if args.cuda else 'cpu'
+        device = torch.device(device_str)
+        model = ProgramLSTM(32, 32, 256, 256, 0.2, device_str)
+        model.to(device)
+
+        with open('data/programs_filtered.json') as fp:
+            data = json.load(fp)
+
+        all_programs = []
+        for entry in data:
+            for prog in entry[-1]:
+                col2type = {int(k): v for k, v in entry[-2].items()}
+                all_programs.append(ProgramTree.from_str(prog, entry[2], entry[-3], col2type))
+
+        recording_time = datetime.now().strftime('%m_%d_%H_%M')
+        optimizer = optim.Adam(model.parameters(), args.lr)
+
+        global_step = avg_loss = start_epoch = 0
+
+        if args.resume_train:
+            checkpoint = torch.load(args.ckpt_path)
+            model.load(args.load_from)
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            recording_time = checkpoint['recording_time']
+            global_step = checkpoint['recording_time']
+            start_epoch = checkpoint['epochs_finished'] + 1
+            # scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+
+        tb_writer = SummaryWriter(log_dir=f'tensorboard/p-lstm-{recording_time}')
+        model.train()
+
+        for epoch_idx in range(start_epoch, args.epoch):
+            print("start training {}th epoch".format(epoch_idx))
+            random.shuffle(all_programs)
+            for idx in tqdm(range(0, len(all_programs), args.batch_size),
+                            total=len(all_programs) // args.batch_size + 1):
+                global_step += 1
+                batch_progs = all_programs[idx:idx + args.batch_size]
+                optimizer.zero_grad()
+                ret_val = model.score(batch_progs)
+                loss = -ret_val[0]
+                avg_loss += torch.sum(loss).data.item()
+                loss = torch.mean(loss)
+                loss.backward()
+                optimizer.step()
+
+                if idx % args.every == 0 and idx > 0:
+                    tb_writer.add_scalar("Avg loss", avg_loss / args.every, global_step)
+                    avg_loss = 0
+
+            if epoch_idx % args.save_every == 0:
+                torch.save({
+                    'recording_time': recording_time,
+                    'total_steps': global_step,
+                    'epochs_finished': epoch_idx,
+                    'optimizer_state_dict': optimizer.state_dict()},
+                    save_path / f'ws_ckpt_{epoch_idx:03}.pt')
+                model.save(save_path / f'ws_model_{epoch_idx:03}.pt')
+
+        return
+
 
 def test_program_tree():
-    # l_str = "hop { nth_argmax { all_rows ; attendance ; 2 } ; home team }=milton keynes dons/True"
-    # a1 = ProgramTree.from_str(l_str)
-    # print(repr(a1))
-    # print(a1.action_list)
-    #
-    # l_str = ("and { eq { nth_min { all_rows ; round ; 3 } ; 3 } ;"
-    #          " eq { hop { nth_argmin { all_rows ; round ; 3 } ; name } ; scott starks } } = true")
-    # a2 = ProgramTree.from_str(l_str)
-    # print(repr(a2))
-    # print(a2.action_list)
-    #
-    # l_str = ("and { "
-    #          "only { filter_greater { filter_eq { all_rows ; decision ; labarbera } ; attendance ; 18000 } } ;"
-    #          " eq { hop { "
-    #          "filter_greater { filter_eq { all_rows ; decision ; labarbera } ; attendance ; 18000 } ;"
-    #          " date } ; november 3 } } = true")
-    # a3 = ProgramTree.from_str(l_str)
-    # print(repr(a3))
-    # print(a3.action_list)
+    l_str = "hop { nth_argmax { all_rows ; attendance ; 2 } ; home team }=milton keynes dons/True"
+    a1 = ProgramTree.from_str(l_str)
+    print(repr(a1))
+    print(a1.action_list)
+
+    l_str = ("and { eq { nth_min { all_rows ; round ; 3 } ; 3 } ;"
+             " eq { hop { nth_argmin { all_rows ; round ; 3 } ; name } ; scott starks } } = true")
+    a2 = ProgramTree.from_str(l_str)
+    print(repr(a2))
+    print(a2.action_list)
+
+    l_str = ("and { "
+             "only { filter_greater { filter_eq { all_rows ; decision ; labarbera } ; attendance ; 18000 } } ;"
+             " eq { hop { "
+             "filter_greater { filter_eq { all_rows ; decision ; labarbera } ; attendance ; 18000 } ;"
+             " date } ; november 3 } } = true")
+    a3 = ProgramTree.from_str(l_str)
+    print(repr(a3))
+    print(a3.action_list)
 
     l_str = "greater_str_inv { all_rows ; venue ; belk gymnasium ; closed }=charlotte speedway/True"
     a4 = ProgramTree.from_str(l_str)
@@ -901,15 +1089,15 @@ def test_program_tree():
     with open('data/logic_form_vocab.json') as fp:
         vocab = json.load(fp)
     # b = ProgramTreeDataset([a1, a2, a3, a4], vocab)
-    b = ProgramTreeDataset([a4], vocab)
+    b = ProgramTreeBatch([a4], vocab)
     print(b.get_parent_action_ids(5))
     print(b.get_parent_field_ids(5))
 
-    ns = ProgramTree.transform_linked_sent(
-        '#sap g33k;5,2# be the team with the third highest #team number;0,3# in the #first championship;-1,-1# .',
-        pd.read_csv('data/l2t/all_csv/2-15584199-3.html.csv', delimiter="#")
-    )
-    print(ns)
+    # ns = ProgramTree.transform_linked_sent(
+    #     '#sap g33k;5,2# be the team with the third highest #team number;0,3# in the #first championship;-1,-1# .',
+    #     pd.read_csv('data/l2t/all_csv/2-15584199-3.html.csv', delimiter="#")
+    # )
+    # print(ns)
 
     l_str = "hop { nth_argmax { all_rows ; total ; 2 } ; province }=chonburi/True"
     a5 = ProgramTree.from_str(l_str)
@@ -918,15 +1106,15 @@ def test_program_tree():
 
     with open('data/logic_form_vocab.json') as fp:
         vocab = json.load(fp)
-    b = ProgramTreeDataset([a5], vocab)
+    b = ProgramTreeBatch([a5], vocab)
     print(b.get_parent_action_ids(5))
     print(b.get_parent_field_ids(5))
 
-    ns = ProgramTree.transform_linked_sent(
-        '#chonburi;2,1# receive the 2nd highest #total;0,5# medal count in the #2008 thailand national game;-1,-1# .',
-        pd.read_csv('data/l2t/all_csv/2-14892957-1.html.csv', delimiter="#")
-    )
-    print(ns)
+    # ns = ProgramTree.transform_linked_sent(
+    #     '#chonburi;2,1# receive the 2nd highest #total;0,5# medal count in the #2008 thailand national game;-1,-1# .',
+    #     pd.read_csv('data/l2t/all_csv/2-14892957-1.html.csv', delimiter="#")
+    # )
+    # print(ns)
     return
 
 
@@ -941,8 +1129,25 @@ def tmp_test():
     return
 
 
+def init_plstm_arg_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--cuda', action='store_true', default=False, help='Use gpu')
+    parser.add_argument('--epoch', default=10, type=int, help="Number of epochs to train the model")
+    parser.add_argument('--batch_size', default=64, type=int, help="The batch size to use during training")
+    parser.add_argument('--lr', default=1e-4, type=float, help="Learning Rate of adam")
+    parser.add_argument('--every', default=250, type=int, help="Log after every n examples")
+    parser.add_argument('--save_every', default=2, type=int, help="Save after every n epochs")
+    parser.add_argument('--resume_train', action='store_true', default=False, help="Resume from save model epoch")
+    parser.add_argument('--model_path', default='', type=str, help="Load model from this path and train")
+    parser.add_argument('--ckpt_path', default='',
+                        type=str, help="Load checkpoint from this path")
+    return parser.parse_args()
+
+
 if __name__ == '__main__':
     # create_vocab()
-    test_program_tree()
+    # test_program_tree()
     # inc_precision()
     # tmp_test()
+    args = init_plstm_arg_parser()
+    ProgramLSTM.train_program_lstm(args)
