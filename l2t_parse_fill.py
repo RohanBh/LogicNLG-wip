@@ -1809,6 +1809,8 @@ class Parser(object):
 
         def check_eq(a):
             for k, v in all_entities:
+                if k == 'ntharg':
+                    continue
                 if obj_compare(a, v, round=True, type="eq"):
                     return k, v
                 if type(v) in [int, float] and obj_compare(a, -v, round=True, type="eq"):

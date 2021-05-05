@@ -117,6 +117,7 @@ def inc_precision():
         # 1. Select the ones with most entities
         # 2. Select the ones which rely only on the headers present in the sent except for the generator header
         # 3. Select the ones which use the mask_header as the generator header
+        # 4. In case of max { all_rows ; header } and hop { argmax { all_row ; header} ; header } choose first.
 
         if len(programs) <= 5:
             new_data.append(entry)
