@@ -2251,7 +2251,7 @@ def test_3(idx=None):
 
 
 def generate_programs():
-    parser = Parser("data/all_csv")
+    parser = Parser("data/l2t/all_csv")
 
     with open('data/l2t/train.json', 'r') as f:
         data = json.load(f)
