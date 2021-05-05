@@ -974,10 +974,44 @@ class ProgramLSTM(nn.Module):
         action_mask_pad = torch.eq(batch.func_mask + batch.copy_mask, 0.)
         action_mask = 1. - action_mask_pad.float()
         action_prob.data.masked_fill_(action_mask_pad.bool(), 1.e-7)
+        if torch.any(action_prob == 0):
+            print("Action prob 0")
+        action_prob.data.masked_fill_(action_prob == 0, 1.e-7)
         # print('uiop', torch.any(action_prob == 0))
         action_prob = action_prob.log() * action_mask
         scores = torch.sum(action_prob, dim=0)
         return scores
+
+    def parse(self, padded_sequences, max_actions):
+        """Do a greedy search to generate target actions given an input sentence
+
+        Args:
+            padded_sequences: dict containing input_ids & attention mask of shape (batch_size, max_seq_len/seq_len)
+            max_actions: Integer indicating the maximum actions to generate
+
+        Returns:
+        """
+        if self.device != torch.device('cpu'):
+            # (batch_size, seq_len)
+            input_ids = padded_sequences['input_ids'].cuda()
+            mask = padded_sequences['attention_mask'].cuda()
+        else:
+            input_ids = padded_sequences['input_ids']
+            mask = padded_sequences['attention_mask']
+
+        batch_size = input_ids.size(0)
+        finished = [False for _ in range(batch_size)]
+        self.eval()
+        with torch.no_grad():
+            sent_encodings, pad_masks = self.encode(padded_sequences)
+            dec_init_vec = self.init_decoder_state(sent_encodings[:, -1, :])
+            transformed_sent_encodings = self.attn_1_linear(sent_encodings)
+            zero_action_embed = self.new_tensor(self.action_embed_size).zero_()
+            attn_vecs = []
+            history_states = []
+            for _ in range(max_actions):
+                outputs = self()
+        return
 
     def save(self, path):
         path = Path(path)
