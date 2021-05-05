@@ -1056,7 +1056,8 @@ class ProgramLSTM(nn.Module):
                     'optimizer_state_dict': optimizer.state_dict()},
                     save_path / f'ws_ckpt_{epoch_idx:03}.pt')
                 model.save(save_path / f'ws_model_{epoch_idx:03}.pt')
-
+        tb_writer.flush()
+        tb_writer.close()
         return
 
 
