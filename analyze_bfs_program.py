@@ -2,8 +2,9 @@ import json
 import pprint
 from collections import Counter
 
-from utils import plotCDF
 import matplotlib.pyplot as plt
+
+from utils import plotCDF
 
 
 def print_succ_masks(data):
@@ -81,5 +82,58 @@ def main():
     return
 
 
+# Amalyze model outputs.
+def print_check_proportion(fname):
+    with open(f"plstm_outputs/{fname}", 'r') as f:
+        data = json.load(f)
+    data = [(x[-1], x[-2] != None) for x in data]
+    ctr = Counter(data)
+    ctr2 = {
+        'False (w/ None)': ctr[(False, False)],
+        'False (w/o None)': ctr[(False, True)],
+        'True': ctr[(True, True)],
+    }
+    print(ctr2)
+    print("Coverage:", ctr[(True, True)] * 100 / len(data))
+    return
+
+
+def show_dist_2(fname):
+    with open(f"plstm_outputs/{fname}", 'r') as f:
+        data = json.load(f)
+    counter = {'True': {}, 'False': {}}
+    tot_prog_dict = {}
+    for entry in data:
+        prog = entry[-2]
+        res = str(entry[-1])
+        if prog is None:
+            continue
+        prog_type = prog.split('{')[0].strip()
+        if prog_type == 'hop':
+            prog_type = prog.split('{')[1].strip()
+        if prog_type not in counter[res]:
+            counter[res][prog_type] = 0
+        if prog_type not in tot_prog_dict:
+            tot_prog_dict[prog_type] = 0
+        counter[res][prog_type] += 1
+        tot_prog_dict[prog_type] += 1
+
+    print("Program types:")
+    for res in ['True', 'False']:
+        print('-' * 5, "For type:", res)
+        counter[res] = {k: (v, tot_prog_dict[k]) for k, v in counter[res].items()}
+        new_counter = dict(sorted(counter[res].items(), key=lambda x: (x[-1][0] / x[-1][1]), reverse=True))
+        pprint.pprint(new_counter, indent=2, sort_dicts=False)
+    return
+
+
+def main2():
+    fname = 'out_49.json'
+    print_check_proportion(fname)
+    show_dist_2(fname)
+    return
+
+
 if __name__ == '__main__':
-    main()
+    # main()
+    main2()

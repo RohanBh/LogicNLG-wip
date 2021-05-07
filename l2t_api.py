@@ -572,6 +572,7 @@ class ExeError(Exception):
 # Type: col - str_col, val - str
 def fuzzy_match_filter(t, col, val, negate=False):
     val = str(val)
+    t[col] = t[col].astype('str')
     trim_t = t[col].str.replace(" ", "")
     trim_val = val.replace(" ", "")
 
@@ -1162,6 +1163,8 @@ def gl_inv_str(t, col1, val, col2, type):
 def check_if_accept(func, returned, actual):
     v = APIs[func]
     k = func
+    if k in ['avg', 'sum']:
+        return obj_compare(actual, returned, True)
     if v['output'] in ['num', 'obj', 'str']:
         return obj_compare(actual, returned)
     elif v['output'] == 'pair_obj':

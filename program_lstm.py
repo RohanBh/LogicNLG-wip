@@ -558,36 +558,41 @@ class ProgramTree:
                 action_list.append(('tok', mapped_ent))
 
         logic_json = {'func': action_list[0][1], 'args': []}
-        curr_args = [logic_json['args']]
+        curr_args_stack = [logic_json['args']]
         curr_func_stack = [action_list[0][1]]
-        for act in action_list:
+        for act in action_list[1:]:
             if act[0] == 'func' and act[1] != 'all_rows':
                 sub_lj = {'func': act[1], 'args': []}
-                curr_args[-1].append(sub_lj)
+                curr_args_stack[-1].append(sub_lj)
                 curr_func_stack.append(act[1])
-                curr_args.append(sub_lj['args'])
+                curr_args_stack.append(sub_lj['args'])
             else:
-                curr_args[-1].append(act[1])
-            if len(curr_args[-1]) == len(APIs[curr_func_stack[-1]]['model_args']):
+                if ';;;' in act[1]:
+                    a = act[1].split(';;;')
+                    a = [x.strip() for x in a]
+                    curr_args_stack[-1].extend(a)
+                else:
+                    curr_args_stack[-1].append(act[1])
+            if len(curr_args_stack[-1]) == len(APIs[curr_func_stack[-1]]['argument']):
                 curr_func_stack.pop()
-                curr_args.pop()
+                curr_args_stack.pop()
             if len(curr_func_stack) == 0:
                 break
         return logic_json
 
     @staticmethod
-    def execute(table_name, logic_json):
-        table = pd.read_csv(f'data/l2t/all_csv/{table_name}', delimiter="#")
+    def execute(table_name, logic_json, table=None):
+        if table is None:
+            table = pd.read_csv(f'data/l2t/all_csv/{table_name}', delimiter="#")
         args = []
         for a in logic_json['args']:
             if isinstance(a, dict):
-                args.append(ProgramTree.execute(table, a))
+                args.append(ProgramTree.execute(table_name, a, table))
             else:
-                if ';;;' in a:
-                    a = a.split(';;;')
-                    a = [x.trim() for x in a]
-                    args.extend(a)
-                args.append(a)
+                if a == 'all_rows':
+                    args.append(table)
+                else:
+                    args.append(a)
 
         return APIs[logic_json['func']]['function'](*args)
 
@@ -1363,7 +1368,7 @@ class ProgramLSTM(nn.Module):
         device_str = 'cuda' if args.cuda else 'cpu'
         device = torch.device(device_str)
         if args.resume_train:
-            model = ProgramLSTM.load(args.model_path)
+            model = ProgramLSTM.load(args.model_path, args.cuda)
         else:
             model = ProgramLSTM(32, 32, 256, 256, 0.2, device_str)
         model.to(device)
@@ -1393,7 +1398,7 @@ class ProgramLSTM(nn.Module):
             checkpoint = torch.load(args.ckpt_path)
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             recording_time = checkpoint['recording_time']
-            global_step = checkpoint['recording_time']
+            global_step = checkpoint['total_steps']
             start_epoch = checkpoint['epochs_finished'] + 1
             # scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
@@ -1443,7 +1448,7 @@ class ProgramLSTM(nn.Module):
         device_str = 'cuda' if args.cuda else 'cpu'
         device = torch.device(device_str)
 
-        model = ProgramLSTM.load(args.model_path)
+        model = ProgramLSTM.load(args.model_path, args.cuda)
         model.to(device)
         model.eval()
 
@@ -1451,7 +1456,12 @@ class ProgramLSTM(nn.Module):
             data = json.load(fp)
 
         results = []
+        if len(args.dbg_sent) > 0:
+            args.batch_size = 1
         for idx in tqdm(range(0, len(data), args.batch_size), total=len(data) // args.batch_size + 1):
+            if len(args.dbg_sent) > 0:
+                if data[idx][1] != args.dbg_sent:
+                    continue
             entries = data[idx:idx + args.batch_size]
 
             sent_list = [e[-1] for e in entries]
@@ -1465,12 +1475,13 @@ class ProgramLSTM(nn.Module):
             for e_idx in range(len(entries)):
                 act_list, trans_sent, table_name = model_out[e_idx], sent_list[e_idx], table_names[e_idx]
                 mask_val, og_sent = masked_vals[e_idx], og_sent_list[e_idx]
+                mask_val = (mask_val[0], str(mask_val[1]))
                 logic_json, ret_val = None, None
                 try:
                     logic_json = ProgramTree.get_logic_json_from_action_list(act_list, trans_sent)
                     ret_val = ProgramTree.execute(table_name, logic_json)
                     is_accepted = check_if_accept(logic_json['func'], ret_val, mask_val[1])
-                except:
+                except Exception as err:
                     is_accepted = False
                 try:
                     ljsonstr = ProgramTree.logic_json_to_str(logic_json)
@@ -1480,7 +1491,7 @@ class ProgramLSTM(nn.Module):
                     ljsonstr += f'={ret_val}/{is_accepted}'
                 results.append((table_name, og_sent, trans_sent, mask_val, act_list, ljsonstr, is_accepted))
 
-        with open(save_path / f'out_{args.out_id}', 'w') as fp:
+        with open(save_path / f'out_{args.out_id}.json', 'w') as fp:
             json.dump(results, fp, indent=2)
         return
 
@@ -1643,13 +1654,16 @@ def init_plstm_arg_parser():
     parser.add_argument('--every', default=250, type=int, help="Log after every n examples")
     parser.add_argument('--save_every', default=2, type=int, help="Save after every n epochs")
     parser.add_argument('--resume_train', action='store_true', default=False, help="Resume from save model epoch")
-    parser.add_argument('--model_path', default='', type=str, help="Load model from this path and train")
+    parser.add_argument('--model_path', default='',
+                        type=str, help="Load model from this path and train")
     parser.add_argument('--ckpt_path', default='',
                         type=str, help="Load checkpoint from this path")
 
     # val args
     parser.add_argument('--out_id', default='', type=str, help='Output id for storing model outputs')
     parser.add_argument('--max_actions', default=50, type=int, help="Max actions to consider while parsing")
+    parser.add_argument('--dbg_sent', default='',
+                        type=str, help="Run only on the given sentence for debugging")
     return parser.parse_args()
 
 
