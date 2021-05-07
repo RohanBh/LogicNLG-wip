@@ -1134,7 +1134,7 @@ class ProgramLSTM(nn.Module):
         scores = torch.sum(action_prob, dim=0)
         return scores
 
-    def parse(self, padded_sequences, max_actions):
+    def parse(self, padded_sequences, max_actions, train_rl=False):
         """Do a greedy search to generate target actions given an input sentence
 
         Args:
@@ -1154,171 +1154,184 @@ class ProgramLSTM(nn.Module):
         batch_size = input_ids.size(0)
         finished = [False for _ in range(batch_size)]
         finished_action_idx = [None for _ in range(batch_size)]
+        log_probs = []
         self.eval()
-        with torch.no_grad():
-            sent_encodings, pad_masks = self.encode(padded_sequences)
-            hc_pair = self.init_decoder_state(sent_encodings[:, -1, :])
-            transformed_sent_encodings = self.attn_1_linear(sent_encodings)
-            zero_action_embed = self.new_tensor(self.action_embed_size).zero_()
 
-            attn_vecs = []
-            history_states = []
-            # n_actions indicates actions taken before (history)
-            # Shape - (n_actions, batch_size). Contains ('func', func_id) or ('tok', gen_tok)
-            history_actions = []
-            # Shape - (n_actions, batch_size). Contains ptrs to parents for prev actions. Store -1 in case of no parents
-            all_parent_ptrs = [[None] * batch_size]
-            parent_ptrs = []
+        sent_encodings, pad_masks = self.encode(padded_sequences)
+        hc_pair = self.init_decoder_state(sent_encodings[:, -1, :])
+        transformed_sent_encodings = self.attn_1_linear(sent_encodings)
+        zero_action_embed = self.new_tensor(self.action_embed_size).zero_()
 
-            for t in range(max_actions):
-                if all(finished):
-                    break
-                if t == 0:
-                    x = self.new_tensor(batch_size, self.decoder_lstm.input_size).zero_()
-                else:
-                    prev_action_embeds = []
-                    # shape - (batch_size, )
-                    for batch_id in range(batch_size):
-                        if not finished[batch_id]:
-                            prev_action = history_actions[t - 1][batch_id]
-                            if prev_action[0] == 'func':
-                                prev_action_embed = self.action_embed.weight[prev_action[1]]
-                            else:
-                                prev_action_embed = zero_action_embed
+        attn_vecs = []
+        history_states = []
+        # n_actions indicates actions taken before (history)
+        # Shape - (n_actions, batch_size). Contains ('func', func_id) or ('tok', gen_tok)
+        history_actions = []
+        # Shape - (n_actions, batch_size). Contains ptrs to parents for prev actions. Store -1 in case of no parents
+        all_parent_ptrs = [[None] * batch_size]
+        parent_ptrs = []
+
+        for t in range(max_actions):
+            if all(finished):
+                break
+            if t == 0:
+                x = self.new_tensor(batch_size, self.decoder_lstm.input_size).zero_()
+            else:
+                prev_action_embeds = []
+                # shape - (batch_size, )
+                for batch_id in range(batch_size):
+                    if not finished[batch_id]:
+                        prev_action = history_actions[t - 1][batch_id]
+                        if prev_action[0] == 'func':
+                            prev_action_embed = self.action_embed.weight[prev_action[1]]
                         else:
                             prev_action_embed = zero_action_embed
+                    else:
+                        prev_action_embed = zero_action_embed
 
-                        prev_action_embeds.append(prev_action_embed)
-                    prev_action_embeds = torch.stack(prev_action_embeds)
+                    prev_action_embeds.append(prev_action_embed)
+                prev_action_embeds = torch.stack(prev_action_embeds)
 
-                    # (batch_size,) Contains the ids of parent_actions
-                    parent_actions_ids = [history_actions[parent_ptrs[batch_id]][batch_id][1]
-                                          if not finished[batch_id] else 0
-                                          for batch_id in range(batch_size)]
-                    parent_actions_ids = T.LongTensor(parent_actions_ids)
-                    # (batch_size, action_embed_size)
-                    parent_action_embed = self.action_embed(parent_actions_ids)
-                    # (batch_size, ) stores curr field names
-                    curr_fields = []
-                    parent_field_ids = []
-                    for batch_id in range(batch_size):
-                        if not finished[batch_id]:
-                            parent_action_idx = parent_ptrs[batch_id]
-                            # ('func', func_id)
-                            p_action_info = history_actions[parent_action_idx][batch_id]
-                            p_action_name = self.inv_vocab['actions'][p_action_info[1]]
-                            arg_idx = len([a for a in all_parent_ptrs if a[batch_id] == parent_action_idx]) - 1
-                            ftype = APIs[p_action_name]['model_args'][arg_idx]
-                            parent_field_ids.append(self.vocab['fields'][ftype])
-                            curr_fields.append(ftype)
-                        else:
-                            parent_field_ids.append(0)
-                            curr_fields.append('no_field')
-
-                    parent_field_ids = T.LongTensor(parent_field_ids)
-                    parent_field_embed = self.field_embed(parent_field_ids)
-                    inputs = [prev_action_embeds, prev_attn_t, parent_action_embed, parent_field_embed]
-
-                    parent_states = torch.stack([
-                        history_states[parent_ptrs[batch_id] if not finished[batch_id] else 0][0][batch_id]
-                        for batch_id in range(batch_size)])
-
-                    inputs.append(parent_states)
-                    x = torch.cat(inputs, dim=-1)
-
-                # (batch_size, decoder_hidden_size) - ht, ct
-                # (batch_size, attn_vector_size)
-                hc_pair, attn_t = self.decoder_step(
-                    x, hc_pair, sent_encodings, transformed_sent_encodings, attn_token_mask=pad_masks)
-
-                # Choose between the following two based on the field embed (is it a row, is it a hdr, mem, n?)
-                # shape - (batch_size, num_actions)
-                hist_act_row = []
+                # (batch_size,) Contains the ids of parent_actions
+                parent_actions_ids = [history_actions[parent_ptrs[batch_id]][batch_id][1]
+                                      if not finished[batch_id] else 0
+                                      for batch_id in range(batch_size)]
+                parent_actions_ids = T.LongTensor(parent_actions_ids)
+                # (batch_size, action_embed_size)
+                parent_action_embed = self.action_embed(parent_actions_ids)
+                # (batch_size, ) stores curr field names
+                curr_fields = []
+                parent_field_ids = []
                 for batch_id in range(batch_size):
-                    if finished[batch_id]:
-                        hist_act_row.append(('func', 0))
-                        continue
-                    if t == 0 or curr_fields[batch_id] in ['row', 'obj']:
-                        # shape - (num_actions,)
-                        apply_func_prob = F.softmax(self.action_readout(attn_t[batch_id]), dim=-1)
+                    if not finished[batch_id]:
+                        parent_action_idx = parent_ptrs[batch_id]
+                        # ('func', func_id)
+                        p_action_info = history_actions[parent_action_idx][batch_id]
+                        p_action_name = self.inv_vocab['actions'][p_action_info[1]]
+                        arg_idx = len([a for a in all_parent_ptrs if a[batch_id] == parent_action_idx]) - 1
+                        ftype = APIs[p_action_name]['model_args'][arg_idx]
+                        parent_field_ids.append(self.vocab['fields'][ftype])
+                        curr_fields.append(ftype)
+                    else:
+                        parent_field_ids.append(0)
+                        curr_fields.append('no_field')
+
+                parent_field_ids = T.LongTensor(parent_field_ids)
+                parent_field_embed = self.field_embed(parent_field_ids)
+                inputs = [prev_action_embeds, prev_attn_t, parent_action_embed, parent_field_embed]
+
+                parent_states = torch.stack([
+                    history_states[parent_ptrs[batch_id] if not finished[batch_id] else 0][0][batch_id]
+                    for batch_id in range(batch_size)])
+
+                inputs.append(parent_states)
+                x = torch.cat(inputs, dim=-1)
+
+            # (batch_size, decoder_hidden_size) - ht, ct
+            # (batch_size, attn_vector_size)
+            hc_pair, attn_t = self.decoder_step(
+                x, hc_pair, sent_encodings, transformed_sent_encodings, attn_token_mask=pad_masks)
+
+            # Choose between the following two based on the field embed (is it a row, is it a hdr, mem, n?)
+            # shape - (batch_size, num_actions)
+            hist_act_row = []
+            for batch_id in range(batch_size):
+                if finished[batch_id]:
+                    hist_act_row.append(('func', 0))
+                    continue
+                if t == 0 or curr_fields[batch_id] in ['row', 'obj']:
+                    # shape - (num_actions,)
+                    apply_func_prob = F.softmax(self.action_readout(attn_t[batch_id]), dim=-1)
+                    if not train_rl:
                         # shape - (1,)
                         next_func = torch.argmax(apply_func_prob, dim=-1).unsqueeze(-1)
-                        hist_act_row.append(('func', next_func.item()))
                     else:
-                        # create copy_mask which has 1 where we can copy entities
-                        field_type = curr_fields[batch_id]
-                        if field_type == 'n':
-                            start_tok, end_tok = 'n_start_tok', 'n_end_tok'
-                        elif 'header' in field_type:
-                            start_tok, end_tok = 'hdr_start_tok', 'hdr_end_tok'
-                        elif 'memory' in field_type:
-                            start_tok, end_tok = 'ent_start_tok', 'ent_end_tok'
-                        else:
-                            raise ValueError(f"Wrong branch! Can't copy for the field {field_type}")
+                        action_probs = torch.distributions.categorical.Categorical(apply_func_prob)
+                        next_func = action_probs.sample()
+                        log_prob = action_probs.log_prob(next_func)
+                        log_probs.append(log_prob)
+                    hist_act_row.append(('func', next_func.item()))
+                else:
+                    # create copy_mask which has 1 where we can copy entities
+                    field_type = curr_fields[batch_id]
+                    if field_type == 'n':
+                        start_tok, end_tok = 'n_start_tok', 'n_end_tok'
+                    elif 'header' in field_type:
+                        start_tok, end_tok = 'hdr_start_tok', 'hdr_end_tok'
+                    elif 'memory' in field_type:
+                        start_tok, end_tok = 'ent_start_tok', 'ent_end_tok'
+                    else:
+                        raise ValueError(f"Wrong branch! Can't copy for the field {field_type}")
 
-                        inside = False
-                        copy_tok = False
-                        token_pos_list = []
+                    inside = False
+                    copy_tok = False
+                    token_pos_list = []
 
-                        for tok_idx, tok in enumerate(input_ids[batch_id]):
-                            tok = get_val(tok)
-                            if tok == self.tokenizer_dict[start_tok]:
-                                inside = True
-                                continue
-                            elif tok == self.tokenizer_dict['fval_end_tok'] and inside:
-                                copy_tok = True
-                                continue
-                            elif tok == self.tokenizer_dict[end_tok]:
-                                inside = False
-                                continue
-                            if copy_tok:
-                                token_pos_list.append(tok_idx)
-                                copy_tok = False
-                        # (seq_len, )
-                        copy_mask = np.zeros((input_ids.size(1),), dtype='float32')
-                        copy_mask[token_pos_list] = 1
-                        copy_mask = torch.from_numpy(copy_mask).bool()
-                        if self.device != torch.device('cpu'):
-                            copy_mask = copy_mask.cude()
-                        # (1, 1, seq_len)
-                        copy_mask = copy_mask.unsqueeze(0).unsqueeze(0)
-                        copy_prob = self.pointer_net(
-                            sent_encodings[batch_id].unsqueeze(0), copy_mask,
-                            attn_t[batch_id, :].unsqueeze(0).unsqueeze(0))
-                        copy_prob = copy_prob.squeeze(0).squeeze(0)
+                    for tok_idx, tok in enumerate(input_ids[batch_id]):
+                        tok = get_val(tok)
+                        if tok == self.tokenizer_dict[start_tok]:
+                            inside = True
+                            continue
+                        elif tok == self.tokenizer_dict['fval_end_tok'] and inside:
+                            copy_tok = True
+                            continue
+                        elif tok == self.tokenizer_dict[end_tok]:
+                            inside = False
+                            continue
+                        if copy_tok:
+                            token_pos_list.append(tok_idx)
+                            copy_tok = False
+                    # (seq_len, )
+                    copy_mask = np.zeros((input_ids.size(1),), dtype='float32')
+                    copy_mask[token_pos_list] = 1
+                    copy_mask = torch.from_numpy(copy_mask).bool()
+                    if self.device != torch.device('cpu'):
+                        copy_mask = copy_mask.cude()
+                    # (1, 1, seq_len)
+                    copy_mask = copy_mask.unsqueeze(0).unsqueeze(0)
+                    copy_prob = self.pointer_net(
+                        sent_encodings[batch_id].unsqueeze(0), copy_mask,
+                        attn_t[batch_id, :].unsqueeze(0).unsqueeze(0))
+                    copy_prob = copy_prob.squeeze(0).squeeze(0)
+                    if not train_rl:
                         next_token_idx = torch.argmax(copy_prob, dim=-1).unsqueeze(-1)
-                        hist_act_row.append(('tok', self.tokenizer.decode(input_ids[batch_id][next_token_idx])))
+                    else:
+                        action_probs = torch.distributions.categorical.Categorical(apply_func_prob)
+                        next_token_idx = action_probs.sample()
+                        log_prob = action_probs.log_prob(next_token_idx)
+                        log_probs.append(log_prob)
+                    hist_act_row.append(('tok', self.tokenizer.decode(input_ids[batch_id][next_token_idx])))
 
-                history_actions.append(hist_act_row)
+            history_actions.append(hist_act_row)
 
-                # check if any outstanding actions are left
-                parent_ptrs = [None] * batch_size
-                for batch_id in range(batch_size):
-                    if finished[batch_id]:
-                        continue
-                    all_actions = [act[batch_id] for act in history_actions]
-                    pseudo_funcs = [self.vocab['actions']['nop'], self.vocab['actions']['all_rows']]
-                    func2sat = {a_idx: False for a_idx, a in enumerate(all_actions)
-                                if a[0] == 'func' and a[1] not in pseudo_funcs}
-                    func2numargs = {a_idx: 0 for a_idx in func2sat.keys()}
-                    for a_idx, a in enumerate(all_actions):
-                        parent_action_idx = all_parent_ptrs[a_idx][batch_id]
-                        if parent_action_idx is not None:
-                            func2numargs[parent_action_idx] += 1
-                    for a_idx, num_args in func2numargs.items():
-                        fn = self.inv_vocab['actions'][all_actions[a_idx][1]]
-                        if len(APIs[fn]['model_args']) <= num_args:
-                            func2sat[a_idx] = True
-                    finished[batch_id] = all(func2sat.values())
-                    if finished[batch_id]:
-                        finished_action_idx[batch_id] = t
-                    if not finished[batch_id]:
-                        parent_ptrs[batch_id] = max(a_idx for a_idx in func2sat.keys() if not func2sat[a_idx])
+            # check if any outstanding actions are left
+            parent_ptrs = [None] * batch_size
+            for batch_id in range(batch_size):
+                if finished[batch_id]:
+                    continue
+                all_actions = [act[batch_id] for act in history_actions]
+                pseudo_funcs = [self.vocab['actions']['nop'], self.vocab['actions']['all_rows']]
+                func2sat = {a_idx: False for a_idx, a in enumerate(all_actions)
+                            if a[0] == 'func' and a[1] not in pseudo_funcs}
+                func2numargs = {a_idx: 0 for a_idx in func2sat.keys()}
+                for a_idx, a in enumerate(all_actions):
+                    parent_action_idx = all_parent_ptrs[a_idx][batch_id]
+                    if parent_action_idx is not None:
+                        func2numargs[parent_action_idx] += 1
+                for a_idx, num_args in func2numargs.items():
+                    fn = self.inv_vocab['actions'][all_actions[a_idx][1]]
+                    if len(APIs[fn]['model_args']) <= num_args:
+                        func2sat[a_idx] = True
+                finished[batch_id] = all(func2sat.values())
+                if finished[batch_id]:
+                    finished_action_idx[batch_id] = t
+                if not finished[batch_id]:
+                    parent_ptrs[batch_id] = max(a_idx for a_idx in func2sat.keys() if not func2sat[a_idx])
 
-                all_parent_ptrs.append(parent_ptrs)
-                history_states.append(hc_pair)
-                attn_vecs.append(attn_t)
-                prev_attn_t = attn_t
+            all_parent_ptrs.append(parent_ptrs)
+            history_states.append(hc_pair)
+            attn_vecs.append(attn_t)
+            prev_attn_t = attn_t
 
         # (batch_size, n_actions_variable)
         new_history_actions = [[] for _ in range(batch_size)]
@@ -1330,7 +1343,10 @@ class ProgramLSTM(nn.Module):
                 elif atype == 'tok':
                     new_history_actions[batch_id].append(('tok', aid))
 
-        return new_history_actions
+        if not train_rl:
+            return new_history_actions
+        else:
+            return new_history_actions, log_probs
 
     def save(self, path):
         path = Path(path)
@@ -1405,7 +1421,7 @@ class ProgramLSTM(nn.Module):
         tb_writer = SummaryWriter(log_dir=f'tensorboard/p-lstm/{recording_time}')
         model.train()
 
-        for epoch_idx in range(start_epoch, args.epoch):
+        for epoch_idx in range(start_epoch, args.epochs):
             print("start training {}th epoch".format(epoch_idx))
             random.shuffle(all_programs)
             for idx in tqdm(range(0, len(all_programs), args.batch_size),
@@ -1441,6 +1457,115 @@ class ProgramLSTM(nn.Module):
         return
 
     @staticmethod
+    def train_rl_program_lstm(args):
+        print(args)
+        save_path = Path('plstm_models/')
+        save_path.mkdir(exist_ok=True)
+        device_str = 'cuda' if args.cuda else 'cpu'
+        device = torch.device(device_str)
+        # pick warm-start model
+        model = ProgramLSTM.load(args.model_path, args.cuda)
+        model.to(device)
+        model.train()
+
+        with open('data/programs_filtered.json') as fp:
+            data = json.load(fp)
+
+        train_data = []
+        for entry in data:
+            linked_sent = entry[2]
+            try:
+                all_ents = [entry[4], entry[5], entry[6]]
+                all_ents = [tuple(y) for x in all_ents for y in x]
+                linked_sent = ProgramTree.fix_linked_sent(linked_sent, all_ents, entry[7])
+            except:
+                pass
+            for prog in entry[-1]:
+                col2type = {int(k): v for k, v in entry[-2].items()}
+                prog_tree = ProgramTree.from_str(prog, linked_sent, entry[-3], col2type, entry[3])
+                mask_val = (entry[3][0], str(entry[3][1]))
+                train_data.append((prog_tree.sent, entry[0], mask_val))
+
+        recording_time = datetime.now().strftime('%m_%d_%H_%M')
+        optimizer = optim.Adam(model.parameters(), args.lr)
+
+        episode_idx = start_episode = 0
+
+        if args.resume_train:
+            checkpoint = torch.load(args.ckpt_path)
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            recording_time = checkpoint['recording_time']
+            episode_idx = checkpoint['curr_episode']
+            start_episode = checkpoint['episodes_finished'] + 1
+
+        tb_writer = SummaryWriter(log_dir=f'tensorboard/p-lstm/{recording_time}')
+        score_history = []
+        random.seed(32)
+        random.shuffle(train_data)
+        while True:
+            for idx, (trans_sent, table_name, mask_val) in tqdm(
+                    enumerate(train_data[start_episode:]), total=len(train_data) - start_episode):
+                episode_idx += 1
+                # print(f"Starting episode {episode_idx}")
+
+                padded_sequences = model.tokenizer(trans_sent, padding=True, truncation=True, return_tensors="pt")
+                model_out, log_probs = model.parse(padded_sequences, args.max_actions, True)
+
+                act_list = model_out[0]
+                try:
+                    logic_json = ProgramTree.get_logic_json_from_action_list(act_list, trans_sent)
+                    ret_val = ProgramTree.execute(table_name, logic_json)
+                    is_accepted = check_if_accept(logic_json['func'], ret_val, mask_val[1])
+                except Exception as err:
+                    is_accepted = False
+
+                rewards = [0] * len(log_probs)
+                if is_accepted:
+                    rewards[-1] = 1
+                else:
+                    rewards[-1] = -1
+
+                policy_loss = []
+                returns = []
+                R = 0
+                for r in rewards[::-1]:
+                    R = r + 1 * R
+                    returns.insert(0, R)
+                returns = torch.FloatTensor(returns)
+                # returns = (returns - returns.mean()) / (returns.std(unbiased=False) + eps)
+                for log_prob, R in zip(log_probs, returns):
+                    policy_loss.append(-log_prob * R)
+                optimizer.zero_grad()
+                policy_loss = torch.stack(policy_loss).sum()
+                policy_loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 5.)
+                optimizer.step()
+
+                tb_writer.add_scalar("ep_return", rewards[-1], episode_idx)
+                score_history.append(rewards[-1])
+                avg_score = np.mean(score_history[-30:])
+
+                if episode_idx % 30 == 0:
+                    tb_writer.add_scalar("avg_reward", avg_score, episode_idx)
+
+                if episode_idx % args.save_every == 0:
+                    torch.save({
+                        'recording_time': recording_time,
+                        'curr_episode': episode_idx,
+                        'optimizer_state_dict': optimizer.state_dict()},
+                        save_path / f'rl_ckpt_{episode_idx:03}.pt')
+                    model.save(save_path / f'rl_model_{episode_idx:03}.pt')
+
+                if episode_idx >= args.episodes:
+                    break
+            if episode_idx >= args.episodes:
+                break
+
+        tb_writer.flush()
+        tb_writer.close()
+        return
+
+    @staticmethod
     def test_program_lstm(args):
         print(args)
         save_path = Path('plstm_outputs/')
@@ -1470,7 +1595,8 @@ class ProgramLSTM(nn.Module):
             og_sent_list = [e[1] for e in entries]
 
             padded_sequences = model.tokenizer(sent_list, padding=True, truncation=True, return_tensors="pt")
-            model_out = model.parse(padded_sequences, args.max_actions)
+            with torch.no_grad():
+                model_out = model.parse(padded_sequences, args.max_actions)
 
             for e_idx in range(len(entries)):
                 act_list, trans_sent, table_name = model_out[e_idx], sent_list[e_idx], table_names[e_idx]
@@ -1648,7 +1774,7 @@ def tmp_test():
 def init_plstm_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--cuda', action='store_true', default=False, help='Use gpu')
-    parser.add_argument('--epoch', default=10, type=int, help="Number of epochs to train the model")
+    parser.add_argument('--epochs', default=10, type=int, help="Number of epochs to train the model")
     parser.add_argument('--batch_size', default=8, type=int, help="The batch size to use during training")
     parser.add_argument('--lr', default=1e-4, type=float, help="Learning Rate of adam")
     parser.add_argument('--every', default=250, type=int, help="Log after every n examples")
@@ -1664,6 +1790,9 @@ def init_plstm_arg_parser():
     parser.add_argument('--max_actions', default=50, type=int, help="Max actions to consider while parsing")
     parser.add_argument('--dbg_sent', default='',
                         type=str, help="Run only on the given sentence for debugging")
+
+    # rl args
+    parser.add_argument('--episodes', default=10000, type=int, help="Number of episodes to train the model with RL")
     return parser.parse_args()
 
 
@@ -1673,7 +1802,8 @@ if __name__ == '__main__':
     # inc_precision()
     # tmp_test()
     args = init_plstm_arg_parser()
-    ProgramLSTM.train_program_lstm(args)
+    # ProgramLSTM.train_program_lstm(args)
+    ProgramLSTM.train_rl_program_lstm(args)
     # ProgramLSTM.test_program_lstm(args)
     # 177, 202, 272, 301, 363, 364, 383
     # print(get_entry(177))
