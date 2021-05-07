@@ -21,6 +21,12 @@ from APIs import non_triggers
 from l2t_api import APIs, memory_arg_funcs, check_if_accept
 from l2t_parse_fill import Parser, split, get_col_types
 
+NEW_TOKENS = ['hfuewjlr', 'cotbwpry', 'gyhulcem', 'uzdfpzvk', 'gifyoazr', 'ogvrhlel', 'hrcdtosp', 'yvyzclyh',
+              'nvoqnztx', 'zfjxetwn', 'rioxievv', 'ccfriagn', 'nqhuopoc', 'huombchu', 'udpvyfhn', 'kjjyzupm',
+              'dmpfjonu', 'bwzxwcoa', 'iezmaqxb', 'qidywllz', 'glrximum', 'cqwpuiux', 'zxlwfmab', 'bcixyahe',
+              'vuxnzyfm', 'taynudla', 'vmxlasbt', 'fpvzuurn', 'srdstkko', 'bytzjzbf', 'zwwszhfu', 'viyhhwec',
+              'uzmtiymv', 'wdncdeqw', 'vdkrbghd']
+
 
 def create_vocab():
     vocab = {'actions': {'nop': 0, 'all_rows': 1}, 'fields': {'no_field': 0}}
@@ -426,8 +432,9 @@ class ProgramTree:
                     elif i == 0:
                         col_type = col2type[j]
                         occured_hdrs.add(j)
-                        new_sent += f'[HDR_START] {col_type} ^# {cols[j]} #^ {"/" * (tag_ctr + 5)} [HDR_END]'
+                        new_sent += f'[HDR_START] {col_type} ^# {cols[j]} #^ {NEW_TOKENS[tag_ctr]} [HDR_END]'
                         tag_ctr += 1
+                        tag_ctr %= len(NEW_TOKENS)
                     else:
                         col_type = col2type[j]
                         if masked_val is not None and cols[j] == masked_val[0][4:] and mention_buf == str(
@@ -435,8 +442,9 @@ class ProgramTree:
                             new_sent += '[MASK]'
                         else:
                             new_sent += (f'[ENT_START] {col_type} ^# {cols[j]} ;;; {mention_buf} #^'
-                                         f' {"/" * (tag_ctr + 5)} [ENT_END]')
+                                         f' {NEW_TOKENS[tag_ctr]} [ENT_END]')
                             tag_ctr += 1
+                            tag_ctr %= len(NEW_TOKENS)
 
                     # Reset the buffer
                     position_buf = ""
@@ -461,8 +469,9 @@ class ProgramTree:
             if j in occured_hdrs:
                 continue
             col_type = col2type[j]
-            new_sent += f'[HDR_START] {col_type} ^# {col} #^ {"/" * (tag_ctr + 5)} [HDR_END] , '
+            new_sent += f'[HDR_START] {col_type} ^# {col} #^ {NEW_TOKENS[tag_ctr]} [HDR_END] , '
             tag_ctr += 1
+            tag_ctr %= len(NEW_TOKENS)
             flag = True
         if flag:
             new_sent = new_sent[:-2] + ' .'
@@ -503,8 +512,9 @@ class ProgramTree:
                 new_tokens.append('^#')
                 new_tokens.append(str(num))
                 new_tokens.append('#^')
-                new_tokens.append('/' * (tag_ctr + 5))
+                new_tokens.append(NEW_TOKENS[tag_ctr])
                 tag_ctr += 1
+                tag_ctr %= len(NEW_TOKENS)
                 new_tokens.append('[N_END]')
             else:
                 new_tokens.append(token)
@@ -573,6 +583,10 @@ class ProgramTree:
             if isinstance(a, dict):
                 args.append(ProgramTree.execute(table, a))
             else:
+                if ';;;' in a:
+                    a = a.split(';;;')
+                    a = [x.trim() for x in a]
+                    args.extend(a)
                 args.append(a)
 
         return APIs[logic_json['func']]['function'](*args)
@@ -580,7 +594,7 @@ class ProgramTree:
     @staticmethod
     def logic_json_to_str(logic_json):
         func = logic_json['func']
-        args = [ProgramTree.logic_json_to_str(arg) if isinstance(arg, dict) else arg for arg in args]
+        args = [ProgramTree.logic_json_to_str(arg) if isinstance(arg, dict) else arg for arg in logic_json['args']]
         return APIs[func]['tostr'](*args)
 
     def __repr__(self):
@@ -834,8 +848,7 @@ class ProgramLSTM(nn.Module):
         self.tokenizer = GPT2Tokenizer.from_pretrained(gpt_model, padding_side='left')
         new_tokens = ['[ENT_START]', '[ENT_END]', '[HDR_START]', '[HDR_END]',
                       '^#', '#^', '[TITLE_START]', '[TITLE_END]', '[N_START]', '[N_END]']
-        for i in range(35):
-            new_tokens.append('/' * (i + 5))
+        new_tokens.extend(NEW_TOKENS)
         self.tokenizer.add_tokens(new_tokens)
         if 'gpt2' in gpt_model:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -1128,12 +1141,14 @@ class ProgramLSTM(nn.Module):
         if self.device != torch.device('cpu'):
             # (batch_size, seq_len)
             input_ids = padded_sequences['input_ids'].cuda()
+            T = torch.cuda
         else:
             input_ids = padded_sequences['input_ids']
+            T = torch
 
         batch_size = input_ids.size(0)
         finished = [False for _ in range(batch_size)]
-        finished_action_idx = [-1 for _ in range(batch_size)]
+        finished_action_idx = [None for _ in range(batch_size)]
         self.eval()
         with torch.no_grad():
             sent_encodings, pad_masks = self.encode(padded_sequences)
@@ -1147,7 +1162,7 @@ class ProgramLSTM(nn.Module):
             # Shape - (n_actions, batch_size). Contains ('func', func_id) or ('tok', gen_tok)
             history_actions = []
             # Shape - (n_actions, batch_size). Contains ptrs to parents for prev actions. Store -1 in case of no parents
-            all_parent_ptrs = []
+            all_parent_ptrs = [[None] * batch_size]
             parent_ptrs = []
 
             for t in range(max_actions):
@@ -1162,7 +1177,7 @@ class ProgramLSTM(nn.Module):
                         if not finished[batch_id]:
                             prev_action = history_actions[t - 1][batch_id]
                             if prev_action[0] == 'func':
-                                prev_action_embed = self.action_embed(prev_action[1])
+                                prev_action_embed = self.action_embed.weight[prev_action[1]]
                             else:
                                 prev_action_embed = zero_action_embed
                         else:
@@ -1172,30 +1187,31 @@ class ProgramLSTM(nn.Module):
                     prev_action_embeds = torch.stack(prev_action_embeds)
 
                     # (batch_size,) Contains the ids of parent_actions
-                    parent_actions = [history_actions[parent_ptrs[batch_id]][batch_id][1]
-                                      if not finished[batch_id] else 0
-                                      for batch_id in range(batch_size)]
+                    parent_actions_ids = [history_actions[parent_ptrs[batch_id]][batch_id][1]
+                                          if not finished[batch_id] else 0
+                                          for batch_id in range(batch_size)]
+                    parent_actions_ids = T.LongTensor(parent_actions_ids)
                     # (batch_size, action_embed_size)
-                    parent_action_embed = [self.action_embed(pa) for pa in parent_actions]
-                    parent_field_embed = []
+                    parent_action_embed = self.action_embed(parent_actions_ids)
                     # (batch_size, ) stores curr field names
                     curr_fields = []
+                    parent_field_ids = []
                     for batch_id in range(batch_size):
                         if not finished[batch_id]:
                             parent_action_idx = parent_ptrs[batch_id]
-                            if parent_action_idx != -1:
-                                # ('func', func_id)
-                                p_action_info = history_actions[parent_action_idx][batch_id]
-                                p_action_name = self.inv_vocab['actions'][p_action_info[1]]
-                                arg_idx = len([a for a in all_parent_ptrs if a[batch_id] == parent_action_idx])
-                                ftype = APIs[p_action_name]['model_args'][arg_idx]
-                                parent_field_embed.append(self.field_embed(self.vocab['fields'][ftype]))
-                                curr_fields.append(ftype)
-                            else:
-                                parent_field_embed.append(self.field_embed(0))
+                            # ('func', func_id)
+                            p_action_info = history_actions[parent_action_idx][batch_id]
+                            p_action_name = self.inv_vocab['actions'][p_action_info[1]]
+                            arg_idx = len([a for a in all_parent_ptrs if a[batch_id] == parent_action_idx]) - 1
+                            ftype = APIs[p_action_name]['model_args'][arg_idx]
+                            parent_field_ids.append(self.vocab['fields'][ftype])
+                            curr_fields.append(ftype)
                         else:
-                            parent_field_embed.append(self.field_embed(0))
+                            parent_field_ids.append(0)
+                            curr_fields.append('no_field')
 
+                    parent_field_ids = T.LongTensor(parent_field_ids)
+                    parent_field_embed = self.field_embed(parent_field_ids)
                     inputs = [prev_action_embeds, prev_attn_t, parent_action_embed, parent_field_embed]
 
                     parent_states = torch.stack([
@@ -1262,15 +1278,16 @@ class ProgramLSTM(nn.Module):
                         # (1, 1, seq_len)
                         copy_mask = copy_mask.unsqueeze(0).unsqueeze(0)
                         copy_prob = self.pointer_net(
-                            sent_encodings[batch_id].unsqueeze(0), copy_mask, attn_t[batch_id, :].unsqueeze(0))
+                            sent_encodings[batch_id].unsqueeze(0), copy_mask,
+                            attn_t[batch_id, :].unsqueeze(0).unsqueeze(0))
                         copy_prob = copy_prob.squeeze(0).squeeze(0)
-                        next_token = torch.argmax(copy_prob, dim=-1).unsqueeze(-1)
-                        hist_act_row.append(('tok', self.tokenizer.decode(next_token)))
+                        next_token_idx = torch.argmax(copy_prob, dim=-1).unsqueeze(-1)
+                        hist_act_row.append(('tok', self.tokenizer.decode(input_ids[batch_id][next_token_idx])))
 
                 history_actions.append(hist_act_row)
 
                 # check if any outstanding actions are left
-                parent_ptrs = [-1] * batch_size
+                parent_ptrs = [None] * batch_size
                 for batch_id in range(batch_size):
                     if finished[batch_id]:
                         continue
@@ -1280,11 +1297,12 @@ class ProgramLSTM(nn.Module):
                                 if a[0] == 'func' and a[1] not in pseudo_funcs}
                     func2numargs = {a_idx: 0 for a_idx in func2sat.keys()}
                     for a_idx, a in enumerate(all_actions):
-                        if a[1] == 'tok' or (a[0] == 'func' and a[1] == self.vocab['actions']['all_rows']):
-                            func2numargs[all_parent_ptrs[a_idx][batch_id]] += 1
+                        parent_action_idx = all_parent_ptrs[a_idx][batch_id]
+                        if parent_action_idx is not None:
+                            func2numargs[parent_action_idx] += 1
                     for a_idx, num_args in func2numargs.items():
-                        fn = self.vocab['actions'][all_actions[a_idx][1]]
-                        if len(APIs[fn]['model_args']) >= num_args:
+                        fn = self.inv_vocab['actions'][all_actions[a_idx][1]]
+                        if len(APIs[fn]['model_args']) <= num_args:
                             func2sat[a_idx] = True
                     finished[batch_id] = all(func2sat.values())
                     if finished[batch_id]:
@@ -1315,7 +1333,7 @@ class ProgramLSTM(nn.Module):
         params = {
             'args': (self.action_embed_size, self.field_embed_size,
                      self.decoder_hidden_size, self.attn_vec_size,
-                     self.dropout, self.gpt_model),
+                     self.dropout.p, self.gpt_model),
             'state_dict': self.state_dict()
         }
         torch.save(params, path)
@@ -1345,7 +1363,7 @@ class ProgramLSTM(nn.Module):
         device_str = 'cuda' if args.cuda else 'cpu'
         device = torch.device(device_str)
         if args.resume_train:
-            model = ProgramLSTM.load(args.load_from)
+            model = ProgramLSTM.load(args.model_path)
         else:
             model = ProgramLSTM(32, 32, 256, 256, 0.2, device_str)
         model.to(device)
@@ -1425,7 +1443,7 @@ class ProgramLSTM(nn.Module):
         device_str = 'cuda' if args.cuda else 'cpu'
         device = torch.device(device_str)
 
-        model = ProgramLSTM.load(args.load_from)
+        model = ProgramLSTM.load(args.model_path)
         model.to(device)
         model.eval()
 
@@ -1433,7 +1451,7 @@ class ProgramLSTM(nn.Module):
             data = json.load(fp)
 
         results = []
-        for idx in tqdm(range(len(data), args.batch_size), total=len(data) // args.batch_size + 1):
+        for idx in tqdm(range(0, len(data), args.batch_size), total=len(data) // args.batch_size + 1):
             entries = data[idx:idx + args.batch_size]
 
             sent_list = [e[-1] for e in entries]
@@ -1454,7 +1472,10 @@ class ProgramLSTM(nn.Module):
                     is_accepted = check_if_accept(logic_json['func'], ret_val, mask_val[1])
                 except:
                     is_accepted = False
-                ljsonstr = ProgramTree.logic_json_to_str(logic_json) if logic_json else None
+                try:
+                    ljsonstr = ProgramTree.logic_json_to_str(logic_json)
+                except:
+                    ljsonstr = None
                 if ljsonstr is not None:
                     ljsonstr += f'={ret_val}/{is_accepted}'
                 results.append((table_name, og_sent, trans_sent, mask_val, act_list, ljsonstr, is_accepted))
@@ -1639,5 +1660,6 @@ if __name__ == '__main__':
     # tmp_test()
     args = init_plstm_arg_parser()
     ProgramLSTM.train_program_lstm(args)
+    # ProgramLSTM.test_program_lstm(args)
     # 177, 202, 272, 301, 363, 364, 383
     # print(get_entry(177))
