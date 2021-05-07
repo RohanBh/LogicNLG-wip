@@ -8,6 +8,8 @@ import time
 
 import nltk
 import numpy as np
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 import pandas
 import pandas as pd
 from nltk.corpus import wordnet
@@ -2027,7 +2029,7 @@ class Parser(object):
         return head_num, head_str, head_date
 
     def distribute_parse(self, inputs):
-        table_name, sent, logic_json, action = inputs
+        table_name, sent, logic_json, action, do_generate = inputs
         # Get filename for caching
         formatted_sent = re.sub(r"[^\w\s]", '', sent)
         formatted_sent = re.sub(r"\s+", '-', formatted_sent)
@@ -2069,10 +2071,14 @@ class Parser(object):
             mem_str, mem_num, mem_date = (
                 remove_h(og_val, mem_str), remove_h(og_val, mem_num), remove_h(og_val, mem_date))
 
-            result = self.run(table_name, raw_sent, masked_sent, pos, mem_str, mem_num,
-                              mem_date, head_str, head_num, head_date, masked_val)
-            c = list(set(result))
-            result = [x for x in c if '/True' in x]
+            if do_generate:
+                result = self.run(table_name, raw_sent, masked_sent, pos, mem_str, mem_num,
+                                  mem_date, head_str, head_num, head_date, masked_val)
+                c = list(set(result))
+                result = [x for x in c if '/True' in x]
+            else:
+                c = []
+                result = []
 
             ret_val = inputs[0], inputs[1], linked_sent, masked_val, mem_str, mem_num, mem_date, len(c), result
 
@@ -2262,7 +2268,7 @@ def generate_programs():
         table_name = entry['url'][entry['url'].find('all_csv/') + 8:]
         logic_json = entry['logic']
         action = entry['action']
-        args.append((table_name, sent, logic_json, action))
+        args.append((table_name, sent, logic_json, action, True))
 
     with mp.Pool(mp.cpu_count()) as pool:
         list(tqdm(pool.imap_unordered(parser.distribute_parse, args, chunksize=1), total=len(args)))
@@ -2270,6 +2276,43 @@ def generate_programs():
 
     with open("data/programs.json", 'w') as f:
         json.dump(results, f, indent=2)
+    return
+
+
+def create_plstm_test_data():
+    from program_lstm import ProgramTree
+    parser = Parser("data/l2t/all_csv")
+
+    with open('data/l2t/test.json', 'r') as f:
+        data = json.load(f)
+
+    args = []
+    for entry in data:
+        sent = entry['sent']
+        table_name = entry['url'][entry['url'].find('all_csv/') + 8:]
+        logic_json = entry['logic']
+        action = entry['action']
+        args.append((table_name, sent, logic_json, action, False))
+
+    with mp.Pool(mp.cpu_count()) as pool:
+        results = list(tqdm(pool.imap(parser.distribute_parse, args, chunksize=1), total=len(args)))
+    new_results = []
+    # inputs[0], inputs[1], linked_sent, masked_val, mem_str, mem_num, mem_date, len(c), result
+    for res in tqdm(results):
+        if res is None:
+            continue
+        table_name, og_sent, linked_sent, masked_val, mem_str, mem_num, mem_data = res[:-2]
+        table = pd.read_csv(f'data/l2t/all_csv/{table_name}', delimiter="#")
+        col2type = get_col_types(table)
+        cols = table.columns.tolist()
+        all_ents = [mem_str, mem_num, mem_data]
+        all_ents = [tuple(y) for x in all_ents for y in x]
+        f_linked_sent = ProgramTree.fix_linked_sent(linked_sent, all_ents, cols)
+        tls = ProgramTree.transform_linked_sent(f_linked_sent, cols, col2type, masked_val)
+        new_results.append((table_name, og_sent, linked_sent, f_linked_sent, masked_val,
+                            mem_str, mem_num, mem_data, tls))
+    with open("data/plstm_test.json", 'w') as f:
+        json.dump(new_results, f, indent=2)
     return
 
 
@@ -2359,6 +2402,7 @@ if __name__ == "__main__":
     # test_1()
     # test_3(6127)
     generate_programs()
+    # create_plstm_test_data()
     # sample_unmasked_sents()
     # create_train_data()
     # train_el(1000)

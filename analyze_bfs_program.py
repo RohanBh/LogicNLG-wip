@@ -54,7 +54,9 @@ def num_progs_cdf(data, is_log=False):
             print(entry[:2])
         tot_progs_arr.append(len(progs))
     ax = plt.gca()
-    plotCDF(ax, {0: tot_progs_arr}, {0: ''}, 'Total Programs', 'Fraction of times', isLog=is_log)
+    plotCDF(ax, {0: tot_progs_arr}, {0: ''}, 'Total Programs', '# of instances', isLog=is_log)
+    locs = plt.yticks()[0]
+    plt.yticks(locs, [f'{float(f) * len(tot_progs_arr):.0f}' for f in locs])
     print("Max programs:", sorted(tot_progs_arr)[-10:])
     print_dict = dict(sorted(Counter(tot_progs_arr).items(), key=lambda x: (x[-1], x[0]))[-10:])
     print(print_dict)

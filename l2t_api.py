@@ -1157,3 +1157,41 @@ def gl_inv_str(t, col1, val, col2, type):
     if len(ret_vals) == 0:
         raise ExeError(f"No rows found {type} than {tmp1} in col {col2}")
     return ret_vals
+
+
+def check_if_accept(func, returned, actual):
+    v = APIs[func]
+    k = func
+    if v['output'] in ['num', 'obj', 'str']:
+        return obj_compare(actual, returned)
+    elif v['output'] == 'pair_obj':
+        if 'greater' in k:
+            comp_type = "less_eq"
+        elif 'less' in k:
+            comp_type = "greater_eq"
+        elif k == 'all_eq_inv':
+            comp_type = "eq"
+        else:
+            return False
+        if len(re.findall(pat_month, actual)) > 0:
+            if returned[1] is None:
+                return False
+            return safe_obj_compare(actual, returned[1], type=comp_type)
+        elif len(re.findall(pat_num, actual)) > 0:
+            if returned[0] is None:
+                return False
+            return safe_obj_compare(actual, returned[0], type=comp_type)
+    elif v['output'] == 'pair_list_obj':
+        ix = None
+        if len(re.findall(pat_month, actual)) > 0:
+            ix = 1
+        elif len(re.findall(pat_num, actual)) > 0:
+            ix = 0
+        if ix is not None:
+            if returned[ix] is None:
+                return False
+            return any(obj_compare(actual, ret_val) for ret_val in returned[ix])
+    elif v['output'] == 'list_str':
+        return any(obj_compare(actual, ret_val) for ret_val in returned)
+
+    return False

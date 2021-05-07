@@ -13,3 +13,5 @@ parser_models/
 tensorboard/*
 *~
 data/l2t/
+plstm_models/
+tmp/results/*.json
