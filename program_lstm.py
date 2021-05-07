@@ -579,7 +579,9 @@ class ProgramTree:
 
     @staticmethod
     def logic_json_to_str(logic_json):
-        pass
+        func = logic_json['func']
+        args = [ProgramTree.logic_json_to_str(arg) if isinstance(arg, dict) else arg for arg in args]
+        return APIs[func]['tostr'](*args)
 
     def __repr__(self):
         return json.dumps(self.logic_json, indent=2)
@@ -1433,19 +1435,33 @@ class ProgramLSTM(nn.Module):
         results = []
         for idx in tqdm(range(len(data), args.batch_size), total=len(data) // args.batch_size + 1):
             entries = data[idx:idx + args.batch_size]
+
             sent_list = [e[-1] for e in entries]
             table_names = [e[0] for e in entries]
             masked_vals = [e[4] for e in entries]
+            og_sent_list = [e[1] for e in entries]
+
             padded_sequences = model.tokenizer(sent_list, padding=True, truncation=True, return_tensors="pt")
             model_out = model.parse(padded_sequences, args.max_actions)
-            for act_list, trans_sent, table_name, mask_val in zip(model_out, sent_list, table_names, masked_vals):
+
+            for e_idx in range(len(entries)):
+                act_list, trans_sent, table_name = model_out[e_idx], sent_list[e_idx], table_names[e_idx]
+                mask_val, og_sent = masked_vals[e_idx], og_sent_list[e_idx]
+                logic_json, ret_val = None, None
                 try:
                     logic_json = ProgramTree.get_logic_json_from_action_list(act_list, trans_sent)
                     ret_val = ProgramTree.execute(table_name, logic_json)
                     is_accepted = check_if_accept(logic_json['func'], ret_val, mask_val[1])
                 except:
                     is_accepted = False
-                results.append(())
+                ljsonstr = ProgramTree.logic_json_to_str(logic_json) if logic_json else None
+                if ljsonstr is not None:
+                    ljsonstr += f'={ret_val}/{is_accepted}'
+                results.append((table_name, og_sent, trans_sent, mask_val, act_list, ljsonstr, is_accepted))
+
+        with open(save_path / f'out_{args.out_id}', 'w') as fp:
+            json.dump(results, fp, indent=2)
+        return
 
 
 def test_program_tree():
