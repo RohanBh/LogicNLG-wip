@@ -1155,7 +1155,8 @@ class ProgramLSTM(nn.Module):
         finished = [False for _ in range(batch_size)]
         finished_action_idx = [None for _ in range(batch_size)]
         log_probs = []
-        self.eval()
+        if not train_rl:
+            self.eval()
 
         sent_encodings, pad_masks = self.encode(padded_sequences)
         hc_pair = self.init_decoder_state(sent_encodings[:, -1, :])
@@ -1286,7 +1287,7 @@ class ProgramLSTM(nn.Module):
                     copy_mask[token_pos_list] = 1
                     copy_mask = torch.from_numpy(copy_mask).bool()
                     if self.device != torch.device('cpu'):
-                        copy_mask = copy_mask.cude()
+                        copy_mask = copy_mask.cuda()
                     # (1, 1, seq_len)
                     copy_mask = copy_mask.unsqueeze(0).unsqueeze(0)
                     copy_prob = self.pointer_net(
@@ -1296,7 +1297,7 @@ class ProgramLSTM(nn.Module):
                     if not train_rl:
                         next_token_idx = torch.argmax(copy_prob, dim=-1).unsqueeze(-1)
                     else:
-                        action_probs = torch.distributions.categorical.Categorical(apply_func_prob)
+                        action_probs = torch.distributions.categorical.Categorical(copy_prob)
                         next_token_idx = action_probs.sample()
                         log_prob = action_probs.log_prob(next_token_idx)
                         log_probs.append(log_prob)
