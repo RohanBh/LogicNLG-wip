@@ -1339,7 +1339,9 @@ class ProgramLSTM(nn.Module):
         # (batch_size, n_actions_variable)
         new_history_actions = [[] for _ in range(batch_size)]
         for batch_id in range(batch_size):
-            for action_idx in range(finished_action_idx[batch_id] + 1):
+            tot_actions = (finished_action_idx[batch_id] + 1 if finished_action_idx[batch_id] is not None
+                           else max_actions)
+            for action_idx in range(tot_actions):
                 atype, aid = history_actions[action_idx][batch_id]
                 if atype == 'func':
                     new_history_actions[batch_id].append(('func', self.inv_vocab['actions'][aid]))
