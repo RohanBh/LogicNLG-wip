@@ -1286,6 +1286,8 @@ class ProgramLSTM(nn.Module):
                     copy_mask = np.zeros((input_ids.size(1),), dtype='float32')
                     copy_mask[token_pos_list] = 1
                     copy_mask = torch.from_numpy(copy_mask).bool()
+                    if not torch.any(copy_mask):
+                        return None, None
                     if self.device != torch.device('cpu'):
                         copy_mask = copy_mask.cuda()
                     # (1, 1, seq_len)
@@ -1511,6 +1513,9 @@ class ProgramLSTM(nn.Module):
 
                 padded_sequences = model.tokenizer(trans_sent, padding=True, truncation=True, return_tensors="pt")
                 model_out, log_probs = model.parse(padded_sequences, args.max_actions, True)
+                if model_out is None and log_probs is None:
+                    # skip when no copy tokens can be found
+                    continue
 
                 act_list = model_out[0]
                 try:
@@ -1544,9 +1549,9 @@ class ProgramLSTM(nn.Module):
 
                 tb_writer.add_scalar("ep_return", rewards[-1], episode_idx)
                 score_history.append(rewards[-1])
-                avg_score = np.mean(score_history[-30:])
+                avg_score = np.mean(score_history[-args.avg_hist:])
 
-                if episode_idx % 30 == 0:
+                if episode_idx % args.avg_hist == 0:
                     tb_writer.add_scalar("avg_reward", avg_score, episode_idx)
 
                 if episode_idx % args.save_every == 0:
@@ -1794,6 +1799,7 @@ def init_plstm_arg_parser():
 
     # rl args
     parser.add_argument('--episodes', default=10000, type=int, help="Number of episodes to train the model with RL")
+    parser.add_argument('--avg_hist', default=100, type=int, help="Number of episodes to take avg of while logging")
     return parser.parse_args()
 
 
