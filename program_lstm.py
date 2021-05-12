@@ -116,6 +116,7 @@ def inc_precision(thresh=3):
         return all_headers
 
     def get_new_entry(en, cl, c2t):
+        # TODO: Add the transformed sentence in the data itself
         return *en[:7], cl, c2t, en[-1]
 
     def get_linked_hdrs(linked_sent, cols):
@@ -241,7 +242,7 @@ def inc_precision(thresh=3):
             continue
         elif len(pix_ctr) == 0:
             continue
-        max_count = max([v for k, v in pix_ctr.items()])
+        max_count = max(pix_ctr.values())
         chosen_pix_list = [k for k, v in pix_ctr.items() if v == max_count]
         new_program_list = [programs[pix] for pix in chosen_pix_list]
         if len(new_program_list) <= thresh:
@@ -268,6 +269,7 @@ class ProgramTree:
 
     @staticmethod
     def fix_linked_sent(linked_sent, all_entities, cols):
+        """This function links the compute entities (> 20) to the headers"""
         # TODO: This was just a hack. Use the correct output from entity linker
         inside = False
         position = False
@@ -406,12 +408,14 @@ class ProgramTree:
     def transform_linked_sent(linked_sent, cols, col2type, masked_val=None):
         """
         e.g. linked sent:
-        #philipp petzschner;-1,-1# #partner;0,3# with #jürgen melzer;7,3# for the majority
-        of his tennis double tournament .
+        #mark donohue;-1,-1# have a higher #start;0,3# in #1969;1,0# than he do in #1970;2,0# .
 
         transformed sent:
-        ^# title ; philipp petzschner #^ ^# type , col , partner #^ with blah blah . The columns are: column1 of type1
-        with entry like e, {repeat}...
+        [TITLE_START] mark donohue [TITLE_END] have a higher [HDR_START] num ^# start #^ hfuewjlr [HDR_END] in [MASK]
+         than he do in [ENT_START] num ^# year ;;; 1970 #^ cotbwpry [ENT_END] .
+         The other headers in this table are: [HDR_START] num ^# year #^ gyhulcem [HDR_END] ,
+          [HDR_START] str ^# chassis #^ uzdfpzvk [HDR_END] , [HDR_START] str ^# engine #^ gifyoazr [HDR_END] ,
+          [HDR_START] num ^# finish #^ ogvrhlel [HDR_END] , [HDR_START] str ^# entrant #^ hrcdtosp [HDR_END]  .
         """
         if any(x is None for x in [linked_sent, cols, col2type]):
             return None
@@ -492,7 +496,7 @@ class ProgramTree:
                 new_tokens.append(token)
                 continue
 
-            if masked_val is not None and masked_val[0] == 'tmp_input' and token == str(masked_val[1]):
+            if masked_val is not None and masked_val[0] == 'msk_input' and token == str(masked_val[1]):
                 new_tokens.append('[MASK]')
                 continue
 
