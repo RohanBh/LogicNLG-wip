@@ -5,10 +5,11 @@ import os
 import random
 import re
 import time
+import warnings
 
 import nltk
 import numpy as np
-import warnings
+
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import pandas
 import pandas as pd
@@ -1531,8 +1532,9 @@ class Parser(object):
         for n in range(len(sent)):
             if sent[n] == '#':
                 if position:
+                    row = int(split(position_buf, "row"))
+                    idx = int(split(position_buf, "col"))
                     if position_buf.startswith('0'):
-                        idx = int(split(position_buf, "col"))
                         if mapping[idx] == 'num':
                             if cols[idx] not in head_num:
                                 head_num.append(cols[idx])
@@ -1545,8 +1547,6 @@ class Parser(object):
                         else:
                             raise ValueError(f"Unsupported col type: {mapping[idx]}")
                     else:
-                        row = int(split(position_buf, "row"))
-                        idx = int(split(position_buf, "col"))
                         if idx == -1:
                             pass
                         else:
@@ -1574,8 +1574,12 @@ class Parser(object):
                             else:
                                 raise ValueError(f"Unsupported col type: {mapping[idx]}")
                     # Direct matching
-                    masked_sent += "<ENTITY{}>".format(ent_index)
-                    ent2content["<ENTITY{}>".format(ent_index)] = str(mention_buf)
+                    if (row, idx) == (-1, -1):
+                        masked_sent += "<NONENTITY{}>".format(ent_index)
+                        ent2content["<NONENTITY{}>".format(ent_index)] = (str(mention_buf), (row, idx))
+                    else:
+                        masked_sent += "<ENTITY{}>".format(ent_index)
+                        ent2content["<ENTITY{}>".format(ent_index)] = (str(mention_buf), (row, idx))
                     ent_index += 1
                     # Reset the buffer
                     position_buf = ""
@@ -1621,7 +1625,7 @@ class Parser(object):
                     # first number in the first matched group
                     num = reres[0][0]
                     new_tokens.append("<NARG{}>".format(ent_index))
-                    ent2content["<NARG{}>".format(ent_index)] = _
+                    ent2content["<NARG{}>".format(ent_index)] = (num, (-2, -2))
                     ent_index += 1
                     mem_num.append(("ntharg", num))
                 else:
@@ -1694,24 +1698,26 @@ class Parser(object):
 
             if compare_score >= count_score:
                 if compare_score > 0:
-                    if head_num:
+                    if len(head_num) > 0:
                         # Bug: If compare_score > 0 and all hdrs in head_num are referenced by some entity in mem_num,
                         # Then, the current token/word will be masked in the sentence but it won't have a corresponding
                         # mem_num value
                         flag = False
+                        _th = None
                         for h in head_num:
                             if any([_[0] == h for _ in mem_num]):
                                 continue
                             else:
                                 mem_num.append((h, num))
+                                _th = h
                                 flag = True
                         if flag:
                             new_tokens.append("<COMPUTE{}>".format(ent_index))
-                            ent2content["<COMPUTE{}>".format(ent_index)] = _
+                            ent2content["<COMPUTE{}>".format(ent_index)] = (_, (-3, cols.index(_th)))
                             ent_index += 1
                         else:
                             new_tokens.append("<NONLINKED{}>".format(ent_index))
-                            ent2content["<NONLINKED{}>".format(ent_index)] = _
+                            ent2content["<NONLINKED{}>".format(ent_index)] = (_, (-5, -5))
                             ent_index += 1
                             nonlinked_num.append(("nonlink_num", num))
                     else:
@@ -1719,24 +1725,26 @@ class Parser(object):
                         # though they may contain some integers. this num token will be masked in the sentence but it
                         # won't have a corresponding mem_num value
                         flag = False
+                        c_idx = None
                         for col_idx, k in zip(range(len(cols) - 1, -1, -1), cols[::-1]):
                             if mapping[col_idx] == 'num':
+                                c_idx = col_idx
                                 mem_num.append((k, num))
                                 head_num.append(k)
                                 flag = True
                                 break
                         if flag:
                             new_tokens.append("<COMPUTE{}>".format(ent_index))
-                            ent2content["<COMPUTE{}>".format(ent_index)] = _
+                            ent2content["<COMPUTE{}>".format(ent_index)] = (_, (-3, c_idx))
                             ent_index += 1
                         else:
                             new_tokens.append("<NONLINKED{}>".format(ent_index))
-                            ent2content["<NONLINKED{}>".format(ent_index)] = _
+                            ent2content["<NONLINKED{}>".format(ent_index)] = (_, (-5, -5))
                             ent_index += 1
                             nonlinked_num.append(("nonlink_num", num))
                 else:
                     new_tokens.append("<NONLINKED{}>".format(ent_index))
-                    ent2content["<NONLINKED{}>".format(ent_index)] = _
+                    ent2content["<NONLINKED{}>".format(ent_index)] = (_, (-5, -5))
                     ent_index += 1
                     nonlinked_num.append(("nonlink_num", num))
                     # new_tokens.append(_)
@@ -1744,12 +1752,12 @@ class Parser(object):
             else:
                 if count_score > 0:
                     new_tokens.append("<COUNT{}>".format(ent_index))
-                    ent2content["<COUNT{}>".format(ent_index)] = _
+                    ent2content["<COUNT{}>".format(ent_index)] = (_, (-4, -4))
                     ent_index += 1
                     mem_num.append(("tmp_input", num))
                 else:
                     new_tokens.append("<NONLINKED{}>".format(ent_index))
-                    ent2content["<NONLINKED{}>".format(ent_index)] = _
+                    ent2content["<NONLINKED{}>".format(ent_index)] = (_, (-5, -5))
                     ent_index += 1
                     nonlinked_num.append(("nonlink_num", num))
                     # new_tokens.append(_)
@@ -1766,7 +1774,7 @@ class Parser(object):
                     for k, content in ent2content.items():
                         if content == str(v):
                             new_k = re.sub(r'<[^0-9]+([0-9]+)>', r'<COUNT\1>', k)
-                            ent2content[new_k] = v
+                            ent2content[new_k] = (v, (-4, -4))
                             new_tokens[new_tokens.index(k)] = new_k
                             to_delete.append(k)
                             break
@@ -1886,6 +1894,14 @@ class Parser(object):
                     if r is not None:
                         return r
         return None
+
+    def fake_parse(self, table_name, og_sent):
+        sent, pos_tags = self.normalize(og_sent)
+        raw_sent = " ".join(sent)
+        linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
+        ret_val = self.initialize_buffer(table_name, linked_sent, pos, raw_sent)[-1]
+        masked_sent, mapping = ret_val[0], ret_val[-1]
+        return masked_sent, mapping
 
     def parse(self, table_name, og_sent, logic_json, action, debug=False):
         sent, pos_tags = self.normalize(og_sent)
