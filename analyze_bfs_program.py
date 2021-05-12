@@ -89,41 +89,44 @@ def print_check_proportion(fname):
     data = [(x[-1], x[-2] != None) for x in data]
     ctr = Counter(data)
     ctr2 = {
-        'False (w/ None)': ctr[(False, False)],
-        'False (w/o None)': ctr[(False, True)],
-        'True': ctr[(True, True)],
+        'FN': ctr[(False, False)],
+        'FP': ctr[(False, True)],
+        'TP': ctr[(True, True)],
     }
     print(ctr2)
-    print("Coverage:", ctr[(True, True)] * 100 / len(data))
+    assert len(data) == sum(ctr2.values())
+    print("Coverage (TP / (TP + FP + FN)):", ctr2['TP'] / len(data))
+    print("Recall (TP / (TP + FN)):", ctr2['TP'] / (ctr2['TP'] + ctr2['FN']))
+    print("Precision (TP / (TP + FP)):", ctr2['TP'] / (ctr2['TP'] + ctr2['FP']))
     return
 
 
 def show_dist_2(fname):
     with open(f"plstm_outputs/{fname}", 'r') as f:
         data = json.load(f)
-    counter = {'True': {}, 'False': {}}
-    tot_prog_dict = {}
+    counter = {'none': 0}
+    tot_prog_dict = {'none': 0}
     for entry in data:
         prog = entry[-2]
-        res = str(entry[-1])
+        is_accept = entry[-1]
         if prog is None:
+            counter['none'] += 1
+            tot_prog_dict['none'] += 1
             continue
         prog_type = prog.split('{')[0].strip()
         if prog_type == 'hop':
             prog_type = prog.split('{')[1].strip()
-        if prog_type not in counter[res]:
-            counter[res][prog_type] = 0
+        if prog_type not in counter:
+            counter[prog_type] = 0
         if prog_type not in tot_prog_dict:
             tot_prog_dict[prog_type] = 0
-        counter[res][prog_type] += 1
+        if is_accept:
+            counter[prog_type] += 1
         tot_prog_dict[prog_type] += 1
 
-    print("Program types:")
-    for res in ['True', 'False']:
-        print('-' * 5, "For type:", res)
-        counter[res] = {k: (v, tot_prog_dict[k]) for k, v in counter[res].items()}
-        new_counter = dict(sorted(counter[res].items(), key=lambda x: (x[-1][0] / x[-1][1]), reverse=True))
-        pprint.pprint(new_counter, indent=2, sort_dicts=False)
+    counter = {k: (v, tot_prog_dict[k]) for k, v in counter.items()}
+    new_counter = dict(sorted(counter.items(), key=lambda x: x[-1][1], reverse=True))
+    pprint.pprint(new_counter, indent=2, sort_dicts=False)
     return
 
 

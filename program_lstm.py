@@ -268,6 +268,7 @@ class ProgramTree:
 
     @staticmethod
     def fix_linked_sent(linked_sent, all_entities, cols):
+        # TODO: This was just a hack. Use the correct output from entity linker
         inside = False
         position = False
         position_buf, mention_buf = '', ''
@@ -1286,7 +1287,7 @@ class ProgramLSTM(nn.Module):
                     copy_mask = np.zeros((input_ids.size(1),), dtype='float32')
                     copy_mask[token_pos_list] = 1
                     copy_mask = torch.from_numpy(copy_mask).bool()
-                    if not torch.any(copy_mask):
+                    if not torch.any(copy_mask) and train_rl:
                         return None, None
                     if self.device != torch.device('cpu'):
                         copy_mask = copy_mask.cuda()
