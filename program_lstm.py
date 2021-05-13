@@ -18,7 +18,7 @@ from tqdm.auto import tqdm
 from transformers import GPT2Model, GPT2Tokenizer
 
 from APIs import non_triggers
-from l2t_api import APIs, memory_arg_funcs, check_if_accept
+from l2t_api import APIs, memory_arg_funcs, check_if_accept, obj_compare
 from l2t_parse_fill import Parser, split, get_col_types
 
 NEW_TOKENS = ['hfuewjlr', 'cotbwpry', 'gyhulcem', 'uzdfpzvk', 'gifyoazr', 'ogvrhlel', 'hrcdtosp', 'yvyzclyh',
@@ -267,49 +267,6 @@ class ProgramTree:
         self.sent = ProgramTree.transform_linked_sent(linked_sent, cols, col2type, masked_val)
         self._actions = None
 
-    @staticmethod
-    def fix_linked_sent(linked_sent, all_entities, cols):
-        """This function links the compute entities (> 20) to the headers"""
-        # TODO: This was just a hack. Use the correct output from entity linker
-        inside = False
-        position = False
-        position_buf, mention_buf = '', ''
-        new_sent = ''
-        ent2sat = {str(e[1]): False for e in all_entities}
-
-        for n in range(len(linked_sent)):
-            if linked_sent[n] == '#':
-                if position:
-                    # i = int(split(position_buf, "row"))
-                    # j = int(split(position_buf, "col"))
-                    ent2sat[mention_buf] = True
-
-                    # Reset the buffer
-                    position_buf = ""
-                    mention_buf = ""
-                    inside = False
-                    position = False
-                else:
-                    inside = True
-            elif linked_sent[n] == ';':
-                position = True
-            else:
-                if position:
-                    position_buf += linked_sent[n]
-                elif inside:
-                    mention_buf += linked_sent[n]
-                else:
-                    # non-linked words
-                    new_sent += linked_sent[n]
-
-        if not all(ent2sat.values()):
-            for e in all_entities:
-                if ent2sat[str(e[1])]:
-                    continue
-                if (isinstance(e[1], int) or isinstance(e[1], float)) and e[1] > 20:
-                    linked_sent = linked_sent.replace(str(e[1]), f'#{e[1]};2,{cols.index(e[0])}#')
-        return linked_sent
-
     @property
     def action_list(self):
         """
@@ -405,7 +362,7 @@ class ProgramTree:
         return ProgramTree._sanitize(ProgramTree._get_logic_json_from_str(logic_str)[0])
 
     @staticmethod
-    def transform_linked_sent(linked_sent, cols, col2type, masked_val=None):
+    def transform_linked_sent(masked_ls, mapping, cols, col2type, masked_val=None):
         """
         e.g. linked sent:
         #mark donohue;-1,-1# have a higher #start;0,3# in #1969;1,0# than he do in #1970;2,0# .
@@ -417,57 +374,47 @@ class ProgramTree:
           [HDR_START] str ^# chassis #^ uzdfpzvk [HDR_END] , [HDR_START] str ^# engine #^ gifyoazr [HDR_END] ,
           [HDR_START] num ^# finish #^ ogvrhlel [HDR_END] , [HDR_START] str ^# entrant #^ hrcdtosp [HDR_END]  .
         """
-        if any(x is None for x in [linked_sent, cols, col2type]):
+        if any(x is None for x in [masked_ls, mapping, cols, col2type]):
             return None
-        inside = False
-        # whether at the index part of the linked entity
-        position = False
-        position_buf, mention_buf = '', ''
-        new_sent = ''
+        new_sent = []
         tag_ctr = 0
+        all_types = {'<ENTITY', '<NONENTITY', '<NARG', '<COMPUTE', '<NONLINKED', '<COUNT'}
 
         occured_hdrs = set()
-        for n in range(len(linked_sent)):
-            if linked_sent[n] == '#':
-                if position:
-                    i = int(split(position_buf, "row"))
-                    j = int(split(position_buf, "col"))
-                    if i == -1:
-                        new_sent += f'[TITLE_START] {mention_buf} [TITLE_END]'
-                    elif i == 0:
-                        col_type = col2type[j]
-                        occured_hdrs.add(j)
-                        new_sent += f'[HDR_START] {col_type} ^# {cols[j]} #^ {NEW_TOKENS[tag_ctr]} [HDR_END]'
-                        tag_ctr += 1
-                        tag_ctr %= len(NEW_TOKENS)
-                    else:
-                        col_type = col2type[j]
-                        if masked_val is not None and cols[j] == masked_val[0][4:] and mention_buf == str(
-                                masked_val[1]):
-                            new_sent += '[MASK]'
-                        else:
-                            new_sent += (f'[ENT_START] {col_type} ^# {cols[j]} ;;; {mention_buf} #^'
-                                         f' {NEW_TOKENS[tag_ctr]} [ENT_END]')
-                            tag_ctr += 1
-                            tag_ctr %= len(NEW_TOKENS)
-
-                    # Reset the buffer
-                    position_buf = ""
-                    mention_buf = ""
-                    inside = False
-                    position = False
-                else:
-                    inside = True
-            elif linked_sent[n] == ';':
-                position = True
+        for tok in masked_ls.split():
+            if tok[0] != '<' or tok[-1] != '>' or not any(t in tok for t in all_types):
+                new_sent.append(tok)
+                continue
+            v, (i, j) = mapping[tok]
+            # -5 nonlink, -4 count, -3 compute, -2 nth, -1 title
+            if i in [-5, -4]:
+                comp_msk_val_0 = 'msk_nonlink_num' if i == -5 else 'msk_input'
+                if masked_val is not None and masked_val[0] == comp_msk_val_0 and obj_compare(v, masked_val[1], True):
+                    new_sent.append('[MASK]')
+            elif i == -2:
+                new_sent.append(f'[N_START] ^# {v} #^ {NEW_TOKENS[tag_ctr]} [N_END]')
+                tag_ctr += 1
+                tag_ctr %= len(NEW_TOKENS)
+            elif i == -1:
+                new_sent.append(f'[TITLE_START] {v} [TITLE_END]')
+            elif i == 0:
+                col_type = col2type[j]
+                occured_hdrs.add(j)
+                new_sent.append(f'[HDR_START] {col_type} ^# {cols[j]} #^ {NEW_TOKENS[tag_ctr]} [HDR_END]')
+                tag_ctr += 1
+                tag_ctr %= len(NEW_TOKENS)
             else:
-                if position:
-                    position_buf += linked_sent[n]
-                elif inside:
-                    mention_buf += linked_sent[n]
+                # -3, normal
+                col_type = col2type[j]
+                if masked_val is not None and cols[j] == masked_val[0][4:] and v == str(masked_val[1]):
+                    new_sent.append('[MASK]')
                 else:
-                    # non-linked words
-                    new_sent += linked_sent[n]
+                    new_sent.append(f'[ENT_START] {col_type} ^# {cols[j]} ;;; {v} #^'
+                                    f' {NEW_TOKENS[tag_ctr]} [ENT_END]')
+                    tag_ctr += 1
+                    tag_ctr %= len(NEW_TOKENS)
+
+        new_sent = ' '.join(new_sent)
         new_sent += ' The other headers in this table are: '
         flag = False
         for j, col in enumerate(cols):
@@ -481,49 +428,7 @@ class ProgramTree:
         if flag:
             new_sent = new_sent[:-2] + ' .'
 
-        new_tokens = []
-        inside = False
-        for token in new_sent.split(' '):
-            if token in ['[ENT_START]', '[ENT_END]', '[HDR_START]', '[HDR_END]', '[TITLE_START]', '[TITLE_END]']:
-                if inside:
-                    inside = False
-                    new_tokens.append(token)
-                    continue
-                inside = True
-                new_tokens.append(token)
-                continue
-            if inside:
-                new_tokens.append(token)
-                continue
-
-            if masked_val is not None and masked_val[0] == 'msk_input' and token == str(masked_val[1]):
-                new_tokens.append('[MASK]')
-                continue
-
-            pat = r'\d(th|nd|rd)'
-            token = token.replace('first', '1st').replace('second', '2nd').replace('third', '3rd').replace(
-                'fourth', '4th').replace('fifth', '5th').replace('sixth', '6th').replace('seventh', '7th').replace(
-                'eighth', '8th').replace('ninth', '9th').replace('tenth', '10th').replace('eleventh', '11th').replace(
-                'twelfth', '12th').replace('thirteenth', '13th').replace('fourteenth', '14th').replace(
-                'fifteenth', '15th')
-            if len(re.findall(pat, token)) > 0:
-                reres = re.findall(r'(\d+)(th|nd|rd)', token)
-                if len(reres) == 0:
-                    new_tokens.append(token)
-                    continue
-                # first number in the first matched group
-                num = reres[0][0]
-                new_tokens.append('[N_START]')
-                new_tokens.append('^#')
-                new_tokens.append(str(num))
-                new_tokens.append('#^')
-                new_tokens.append(NEW_TOKENS[tag_ctr])
-                tag_ctr += 1
-                tag_ctr %= len(NEW_TOKENS)
-                new_tokens.append('[N_END]')
-            else:
-                new_tokens.append(token)
-        return ' '.join(new_tokens)
+        return new_sent
 
     @staticmethod
     def get_logic_json_from_action_list(model_action_list, trans_link_sent):
