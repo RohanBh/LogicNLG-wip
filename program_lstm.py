@@ -581,8 +581,6 @@ class ProgramTreeBatch:
                 'fval_start_tok': tokenizer.convert_tokens_to_ids('^#'),
                 'fval_end_tok': tokenizer.convert_tokens_to_ids('#^')
             }
-            if any(tokenizer.convert_tokens_to_ids(tokenizer.eos_token) == v for v in self.tokenizer_dict.values()):
-                raise ValueError(f"Bad tokenizer object with tokenizer_dict {self.tokenizer_dict}")
 
         assert len(self.sent_list) == 0 or len(self.sent_list) == len(self)
 
@@ -798,16 +796,16 @@ class ProgramLSTM(nn.Module):
 
         if 'gpt2' in model_name:
             self.tokenizer = GPT2Tokenizer.from_pretrained(model_name, padding_side='left')
+            self.tokenizer.pad_token = self.tokenizer.eos_token
         elif 'roberta' in model_name:
-            self.tokenizer = RobertaTokenizer.from_pretrained(model_name, padding_side='left')
+            self.tokenizer = RobertaTokenizer.from_pretrained(model_name)
         else:
-            self.tokenizer = BertTokenizer.from_pretrained(model_name, padding_side='left')
+            self.tokenizer = BertTokenizer.from_pretrained(model_name)
+
         new_tokens = ['[MASK]', '[ENT_START]', '[ENT_END]', '[HDR_START]', '[HDR_END]',
                       '^#', '#^', '[TITLE_START]', '[TITLE_END]', '[N_START]', '[N_END]']
         new_tokens.extend(NEW_TOKENS)
         self.tokenizer.add_tokens(new_tokens)
-        if 'gpt2' in model_name:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer_dict = {
             'ent_start_tok': self.tokenizer.convert_tokens_to_ids('[ENT_START]'),
             'ent_end_tok': self.tokenizer.convert_tokens_to_ids('[ENT_END]'),
@@ -922,16 +920,18 @@ class ProgramLSTM(nn.Module):
         hidden_states = encoder_output.last_hidden_state
         return hidden_states, mask.bool()
 
-    def init_decoder_state(self, enc_last_state):
+    def init_decoder_state(self, enc_hidden_states):
         """
         Compute the initial decoder hidden state and cell state from the last state of encoder
 
         Args:
-            enc_last_state: of shape (batch_size, encoder_hidden_size)
+            enc_hidden_states: of shape (batch_size, seq_len, encoder_hidden_size)
 
         Returns: (batch_size, decoder_hidden_size) h_0, (batch_size, decoder_hidden_size) c_0
 
         """
+        sel_idx = -1 if 'gpt2' in self.model_name else 0
+        enc_last_state = enc_hidden_states[:, sel_idx, :]
         h_0 = self.decoder_cell_init(enc_last_state)
         return h_0, self.new_tensor(h_0.size()).zero_()
 
@@ -1059,7 +1059,7 @@ class ProgramLSTM(nn.Module):
         #    a bool indicating which tokens should be copied
         batch = ProgramTreeBatch(program_trees, self.vocab, self.tokenizer, cuda=self.device != torch.device('cpu'))
         sent_encodings, pad_masks = self.encode(batch.padded_sequences)
-        dec_init_vec = self.init_decoder_state(sent_encodings[:, -1, :])
+        dec_init_vec = self.init_decoder_state(sent_encodings)
         # query_vectors are attention hidden states h_t~ of the decoder
         # shape - (action_seq_len, batch_size, attn_vector_size)
         query_vectors = self.decode(batch, sent_encodings, dec_init_vec, pad_masks)
@@ -1117,7 +1117,7 @@ class ProgramLSTM(nn.Module):
             self.eval()
 
         sent_encodings, pad_masks = self.encode(padded_sequences)
-        hc_pair = self.init_decoder_state(sent_encodings[:, -1, :])
+        hc_pair = self.init_decoder_state(sent_encodings)
         transformed_sent_encodings = self.attn_1_linear(sent_encodings)
         zero_action_embed = self.new_tensor(self.action_embed_size).zero_()
 
@@ -1727,7 +1727,9 @@ def tmp_test():
 def init_plstm_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--cuda', action='store_true', default=False, help='Use gpu')
-    parser.add_argument('--model', default='gpt2', type=str, help="Pretrained model to use as encoder")
+    parser.add_argument('--model', default='gpt2', type=str,
+                        help="Pretrained model to use as encoder. "
+                             "Use one of gpt2, roberta-base, bert-base-uncased")
     parser.add_argument('--epochs', default=10, type=int, help="Number of epochs to train the model")
     parser.add_argument('--batch_size', default=8, type=int, help="The batch size to use during training")
     parser.add_argument('--lr', default=1e-4, type=float, help="Learning Rate of adam")
