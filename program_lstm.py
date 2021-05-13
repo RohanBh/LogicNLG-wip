@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from torch import nn, optim, autograd
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
-from transformers import GPT2Model, GPT2Tokenizer
+from transformers import GPT2Model, GPT2Tokenizer, RobertaTokenizer, RobertaModel
 
 from APIs import non_triggers
 from l2t_api import APIs, memory_arg_funcs, check_if_accept
@@ -783,25 +783,28 @@ class ProgramLSTM(nn.Module):
     """
 
     def __init__(self, action_embed_size, field_embed_size, decoder_hidden_size,
-                 attn_vec_size, dropout, device_str='cpu', gpt_model='gpt2'):
+                 attn_vec_size, dropout, device_str='cpu', model_name='roberta-base'):
         super(ProgramLSTM, self).__init__()
         self.action_embed_size = action_embed_size
         self.attn_vec_size = attn_vec_size
         self.field_embed_size = field_embed_size
         self.decoder_hidden_size = decoder_hidden_size
-        self.gpt_model = gpt_model
+        self.model_name = model_name
         self.device = torch.device(device_str)
         with open('data/logic_form_vocab.json') as fp:
             self.vocab = json.load(fp)
         self.inv_vocab = {'actions': {v: k for k, v in self.vocab['actions'].items()},
                           'fields': {v: k for k, v in self.vocab['fields'].items()}}
 
-        self.tokenizer = GPT2Tokenizer.from_pretrained(gpt_model, padding_side='left')
-        new_tokens = ['[ENT_START]', '[ENT_END]', '[HDR_START]', '[HDR_END]',
+        if 'gpt2' in model_name:
+            self.tokenizer = GPT2Tokenizer.from_pretrained(model_name, padding_side='left')
+        else:
+            self.tokenizer = RobertaTokenizer.from_pretrained(model_name, padding_side='left')
+        new_tokens = ['[MASK]', '[ENT_START]', '[ENT_END]', '[HDR_START]', '[HDR_END]',
                       '^#', '#^', '[TITLE_START]', '[TITLE_END]', '[N_START]', '[N_END]']
         new_tokens.extend(NEW_TOKENS)
         self.tokenizer.add_tokens(new_tokens)
-        if 'gpt2' in gpt_model:
+        if 'gpt2' in model_name:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer_dict = {
             'ent_start_tok': self.tokenizer.convert_tokens_to_ids('[ENT_START]'),
@@ -814,10 +817,14 @@ class ProgramLSTM(nn.Module):
             'fval_end_tok': self.tokenizer.convert_tokens_to_ids('#^')
         }
 
-        self.encoder = GPT2Model.from_pretrained(gpt_model)
+        if 'gpt2' in model_name:
+            self.encoder = GPT2Model.from_pretrained(model_name)
+            encoder_hidden_size = self.encoder.config.n_embd
+        else:
+            self.encoder = RobertaModel.from_pretrained(model_name)
+            encoder_hidden_size = self.encoder.config.hidden_size
         self.encoder.resize_token_embeddings(len(self.tokenizer))
         # encoder_hidden_size = self.encoder.config.hidden_size
-        encoder_hidden_size = self.encoder.config.n_embd
         self.encoder.to(self.device)
 
         # embedding for funcs
@@ -1305,7 +1312,7 @@ class ProgramLSTM(nn.Module):
         params = {
             'args': (self.action_embed_size, self.field_embed_size,
                      self.decoder_hidden_size, self.attn_vec_size,
-                     self.dropout.p, self.gpt_model),
+                     self.dropout.p, self.model_name),
             'state_dict': self.state_dict()
         }
         torch.save(params, path)
