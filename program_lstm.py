@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from torch import nn, optim, autograd
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
-from transformers import GPT2Model, GPT2Tokenizer, RobertaTokenizer, RobertaModel
+from transformers import GPT2Model, GPT2Tokenizer, RobertaTokenizer, RobertaModel, BertTokenizer, BertModel
 
 from APIs import non_triggers
 from l2t_api import APIs, memory_arg_funcs, check_if_accept
@@ -798,8 +798,10 @@ class ProgramLSTM(nn.Module):
 
         if 'gpt2' in model_name:
             self.tokenizer = GPT2Tokenizer.from_pretrained(model_name, padding_side='left')
-        else:
+        elif 'roberta' in model_name:
             self.tokenizer = RobertaTokenizer.from_pretrained(model_name, padding_side='left')
+        else:
+            self.tokenizer = BertTokenizer.from_pretrained(model_name, padding_side='left')
         new_tokens = ['[MASK]', '[ENT_START]', '[ENT_END]', '[HDR_START]', '[HDR_END]',
                       '^#', '#^', '[TITLE_START]', '[TITLE_END]', '[N_START]', '[N_END]']
         new_tokens.extend(NEW_TOKENS)
@@ -820,8 +822,11 @@ class ProgramLSTM(nn.Module):
         if 'gpt2' in model_name:
             self.encoder = GPT2Model.from_pretrained(model_name)
             encoder_hidden_size = self.encoder.config.n_embd
-        else:
+        elif 'roberta' in model_name:
             self.encoder = RobertaModel.from_pretrained(model_name)
+            encoder_hidden_size = self.encoder.config.hidden_size
+        else:
+            self.encoder = BertModel.from_pretrained(model_name)
             encoder_hidden_size = self.encoder.config.hidden_size
         self.encoder.resize_token_embeddings(len(self.tokenizer))
         # encoder_hidden_size = self.encoder.config.hidden_size
@@ -1344,7 +1349,7 @@ class ProgramLSTM(nn.Module):
         if args.resume_train:
             model = ProgramLSTM.load(args.model_path, args.cuda)
         else:
-            model = ProgramLSTM(32, 32, 256, 256, 0.2, device_str)
+            model = ProgramLSTM(32, 32, 256, 256, 0.2, device_str, args.model)
         model.to(device)
 
         with open('data/programs_filtered.json') as fp:
@@ -1722,6 +1727,7 @@ def tmp_test():
 def init_plstm_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--cuda', action='store_true', default=False, help='Use gpu')
+    parser.add_argument('--model', default='gpt2', type=str, help="Pretrained model to use as encoder")
     parser.add_argument('--epochs', default=10, type=int, help="Number of epochs to train the model")
     parser.add_argument('--batch_size', default=8, type=int, help="The batch size to use during training")
     parser.add_argument('--lr', default=1e-4, type=float, help="Learning Rate of adam")
