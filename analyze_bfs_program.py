@@ -73,7 +73,6 @@ def main():
     show_dist(data)
     num_progs_cdf(data, is_log=True)
     print("#" * 100)
-    # TODO: Check if this still works after modifying programs_filtered
     with open("data/programs_filtered.json", 'r') as f:
         data = json.load(f)
     print_succ_masks(data)

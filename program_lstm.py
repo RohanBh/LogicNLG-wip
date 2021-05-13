@@ -1,6 +1,7 @@
 import argparse
 import json
 # noinspection PyUnresolvedReferences
+import pprint
 import random
 import re
 from collections import Counter
@@ -95,9 +96,26 @@ def _get_must_haves(parser, og_sent, table_name, linked_sent):
     return must_have
 
 
-def inc_precision(thresh=3):
+def _compare(_a, _b):
+    _a = str(_a)
+    _b = str(_b)
+    if _a == _b:
+        return True
+    try:
+        _a = float(_a)
+        _b = float(_b)
+        return _a == _b
+    except:
+        return False
+
+
+def inc_precision(thresh=3, test_sent=''):
     with open('data/programs.json') as fp:
         data = json.load(fp)
+
+    if len(test_sent) > 0:
+        idx = [i for i, ent in enumerate(data) if ent is not None and ent[1] == test_sent]
+        data = [data[i] for i in idx]
 
     parser = Parser("data/l2t/all_csv")
 
@@ -108,7 +126,7 @@ def inc_precision(thresh=3):
             all_hdr_args = [aidx for aidx, a in enumerate(APIs[func]['argument']) if 'header' in a]
             if len(all_hdr_args) > 0:
                 fargs = [arg.split(';;;') if isinstance(arg, str) else [arg] for arg in logic_json['args']]
-                fargs = [y for x in fargs for y in x]
+                fargs = [y.strip() if isinstance(y, str) else y for x in fargs for y in x]
                 all_headers.extend(fargs[i] for i in all_hdr_args)
         for arg in logic_json['args']:
             if isinstance(arg, dict):
@@ -192,7 +210,7 @@ def inc_precision(thresh=3):
         # 5. Select the ones which generate the full str output instead of just the int part
         # 6. Select the ones which rely on nth_arg if present
         program_trees = [ProgramTree.from_str(p_str) for p_str in programs]
-        msk_header = entry[3][0][4:]
+        msk_header = entry[3][0][4:].strip()
         if msk_header == 'input':
             # select the count funcs
             new_program_list = [p_ix for p_ix, p in enumerate(programs) if 'count {' in p]
@@ -204,7 +222,7 @@ def inc_precision(thresh=3):
                 lj = pt.logic_json
                 func, fargs = lj['func'], lj['args']
                 fargs = [arg.split(';;;') if isinstance(arg, str) else [arg] for arg in fargs]
-                fargs = [y for x in fargs for y in x]
+                fargs = [y.strip() if isinstance(y, str) else y for x in fargs for y in x]
                 all_hdr_args = [aidx for aidx, a in enumerate(APIs[func]['argument']) if 'header' in a]
                 if len(all_hdr_args) > 0:
                     harg_idx = all_hdr_args[0]
@@ -222,11 +240,21 @@ def inc_precision(thresh=3):
                 new_program_list.append(pt_idx)
         all_programs_list.append(new_program_list)
 
+        # select the ones which use most linked headers
+        prog2num = {}
+        for pt_idx, pt in enumerate(program_trees):
+            all_used_hdrs = set(get_all_headers(pt.logic_json))
+            linked_hdrs = get_linked_hdrs(entry[2], cols)
+            prog2num[pt_idx] = len(linked_hdrs.intersection(all_used_hdrs))
+        max_num = max(prog2num.values())
+        new_program_list = [pt_idx for pt_idx, num in prog2num.items() if num == max_num]
+        all_programs_list.append(new_program_list)
+
         # Select the ones which generate the full str
         new_program_list = []
         for p_ix, prog in enumerate(programs):
             ret_val = prog[prog.rfind('=') + 1:-5]
-            if ret_val == entry[3]:
+            if _compare(ret_val, entry[3][1]):
                 new_program_list.append(p_ix)
         all_programs_list.append(new_program_list)
 
@@ -252,8 +280,11 @@ def inc_precision(thresh=3):
         #     new_data.append(get_new_entry(entry, cols, col2type))
         continue
 
-    with open("data/programs_filtered.json", 'w') as f:
-        json.dump(new_data, f, indent=2)
+    if len(test_sent) == 0:
+        with open("data/programs_filtered.json", 'w') as f:
+            json.dump(new_data, f, indent=2)
+    else:
+        pprint.pprint(new_data, indent=2)
     return
 
 
@@ -375,18 +406,6 @@ class ProgramTree:
           [HDR_START] str ^# chassis #^ uzdfpzvk [HDR_END] , [HDR_START] str ^# engine #^ gifyoazr [HDR_END] ,
           [HDR_START] num ^# finish #^ ogvrhlel [HDR_END] , [HDR_START] str ^# entrant #^ hrcdtosp [HDR_END]  .
         """
-
-        def _compare(_a, _b):
-            _a = str(_a)
-            _b = str(_b)
-            if _a == _b:
-                return True
-            try:
-                _a = float(_a)
-                _b = float(_b)
-                return _a == _b
-            except:
-                return False
 
         if any(x is None for x in [masked_ls, mapping, cols, col2type]):
             return None
@@ -1311,8 +1330,8 @@ class ProgramLSTM(nn.Module):
     @staticmethod
     def train_program_lstm(args):
         print(args)
-        save_path = Path('plstm_models/')
-        save_path.mkdir(exist_ok=True)
+        save_path = args.save_base_dir / Path('plstm_models/')
+        save_path.mkdir(exist_ok=True, parents=True)
         device_str = 'cuda' if args.cuda else 'cpu'
         device = torch.device(device_str)
         if args.resume_train:
@@ -1385,8 +1404,8 @@ class ProgramLSTM(nn.Module):
     @staticmethod
     def train_rl_program_lstm(args):
         print(args)
-        save_path = Path('plstm_models/')
-        save_path.mkdir(exist_ok=True)
+        save_path = args.save_base_dir / Path('plstm_models/')
+        save_path.mkdir(exist_ok=True, parents=True)
         device_str = 'cuda' if args.cuda else 'cpu'
         device = torch.device(device_str)
         # pick warm-start model
@@ -1406,22 +1425,25 @@ class ProgramLSTM(nn.Module):
         optimizer = optim.Adam(model.parameters(), args.lr)
 
         episode_idx = start_episode = 0
+        n_episode_idx = None
 
         if args.resume_train:
             checkpoint = torch.load(args.ckpt_path)
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             recording_time = checkpoint['recording_time']
-            episode_idx = checkpoint['curr_episode']
+            n_episode_idx = checkpoint['curr_episode']
             start_episode = checkpoint['episodes_finished'] + 1
 
         tb_writer = SummaryWriter(log_dir=f'tensorboard/p-lstm/{recording_time}')
         score_history = []
         random.seed(32)
-        random.shuffle(train_data)
         while True:
+            random.shuffle(train_data)
             for idx, (trans_sent, table_name, mask_val) in tqdm(
                     enumerate(train_data[start_episode:]), total=len(train_data) - start_episode):
                 episode_idx += 1
+                if n_episode_idx is not None and episode_idx <= n_episode_idx:
+                    continue
                 # print(f"Starting episode {episode_idx}")
 
                 padded_sequences = model.tokenizer(trans_sent, padding=True, truncation=True, return_tensors="pt")
@@ -1472,8 +1494,8 @@ class ProgramLSTM(nn.Module):
                         'recording_time': recording_time,
                         'curr_episode': episode_idx,
                         'optimizer_state_dict': optimizer.state_dict()},
-                        save_path / f'rl_ckpt_{episode_idx:03}.pt')
-                    model.save(save_path / f'rl_model_{episode_idx:03}.pt')
+                        save_path / f'rl_ckpt_{episode_idx:06}.pt')
+                    model.save(save_path / f'rl_model_{episode_idx:06}.pt')
 
                 if episode_idx >= args.episodes:
                     break
@@ -1699,6 +1721,8 @@ def init_plstm_arg_parser():
     parser.add_argument('--every', default=250, type=int, help="Log after every n examples")
     parser.add_argument('--save_every', default=2, type=int, help="Save after every n epochs")
     parser.add_argument('--resume_train', action='store_true', default=False, help="Resume from save model epoch")
+    parser.add_argument('--save_base_dir', default='',
+                        type=str, help="Save model and ckpt in this directory")
     parser.add_argument('--model_path', default='',
                         type=str, help="Load model from this path and train")
     parser.add_argument('--ckpt_path', default='',
@@ -1722,8 +1746,8 @@ if __name__ == '__main__':
     # inc_precision()
     # tmp_test()
     args = init_plstm_arg_parser()
-    # ProgramLSTM.train_program_lstm(args)
-    ProgramLSTM.train_rl_program_lstm(args)
+    ProgramLSTM.train_program_lstm(args)
+    # ProgramLSTM.train_rl_program_lstm(args)
     # ProgramLSTM.test_program_lstm(args)
     # 177, 202, 272, 301, 363, 364, 383
     # print(get_entry(177))
