@@ -1625,7 +1625,7 @@ class Parser(object):
                     # first number in the first matched group
                     num = reres[0][0]
                     new_tokens.append("<NARG{}>".format(ent_index))
-                    ent2content["<NARG{}>".format(ent_index)] = (num, (-2, -2))
+                    ent2content["<NARG{}>".format(ent_index)] = (num, (-7, -7))
                     ent_index += 1
                     mem_num.append(("ntharg", num))
                 else:
@@ -1703,17 +1703,20 @@ class Parser(object):
                         # Then, the current token/word will be masked in the sentence but it won't have a corresponding
                         # mem_num value
                         flag = False
-                        _th = None
+                        _th = []
                         for h in head_num:
                             if any([_[0] == h for _ in mem_num]):
                                 continue
                             else:
                                 mem_num.append((h, num))
-                                _th = h
+                                _th.append(h)
                                 flag = True
                         if flag:
                             new_tokens.append("<COMPUTE{}>".format(ent_index))
-                            ent2content["<COMPUTE{}>".format(ent_index)] = (_, (-3, cols.index(_th)))
+                            if len(_th) == 1:
+                                ent2content["<COMPUTE{}>".format(ent_index)] = (_, (-3, cols.get_loc(_th[0])))
+                            else:
+                                ent2content["<COMPUTE{}>".format(ent_index)] = (_, (-3, -3))
                             ent_index += 1
                         else:
                             new_tokens.append("<NONLINKED{}>".format(ent_index))
@@ -1772,7 +1775,7 @@ class Parser(object):
                     str(v) + " "):
                     mem_num[index] = ('tmp_input', v)
                     for k, content in ent2content.items():
-                        if content == str(v):
+                        if content[0] == str(v):
                             new_k = re.sub(r'<[^0-9]+([0-9]+)>', r'<COUNT\1>', k)
                             ent2content[new_k] = (v, (-4, -4))
                             new_tokens[new_tokens.index(k)] = new_k
@@ -1899,7 +1902,7 @@ class Parser(object):
         sent, pos_tags = self.normalize(og_sent)
         raw_sent = " ".join(sent)
         linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
-        ret_val = self.initialize_buffer(table_name, linked_sent, pos, raw_sent)[-1]
+        ret_val = self.initialize_buffer(table_name, linked_sent, pos, raw_sent)
         masked_sent, mapping = ret_val[0], ret_val[-1]
         return masked_sent, mapping
 
@@ -2092,14 +2095,14 @@ class Parser(object):
                                   mem_date, head_str, head_num, head_date, masked_val)
                 c = list(set(result))
                 result = [x for x in c if '/True' in x]
+                ret_val = inputs[0], inputs[1], linked_sent, masked_val, mem_str, mem_num, mem_date, len(c), result
             else:
-                c = []
-                result = []
+                ret_val = (inputs[0], inputs[1], linked_sent, masked_val,
+                           mem_str, mem_num, mem_date, masked_sent, mapping)
 
-            ret_val = inputs[0], inputs[1], linked_sent, masked_val, mem_str, mem_num, mem_date, len(c), result
-
-            with open('tmp/results/{}.json'.format(formatted_sent), 'w') as f:
-                json.dump(ret_val, f, indent=2)
+            if do_generate:
+                with open('tmp/results/{}.json'.format(formatted_sent), 'w') as f:
+                    json.dump(ret_val, f, indent=2)
 
             return ret_val
         else:
@@ -2317,16 +2320,13 @@ def create_plstm_test_data():
     for res in tqdm(results):
         if res is None:
             continue
-        table_name, og_sent, linked_sent, masked_val, mem_str, mem_num, mem_data = res[:-2]
+        table_name, og_sent, linked_sent, masked_val, mem_str, mem_num, mem_data, masked_sent, mapping = res
         table = pd.read_csv(f'data/l2t/all_csv/{table_name}', delimiter="#")
         col2type = get_col_types(table)
         cols = table.columns.tolist()
-        all_ents = [mem_str, mem_num, mem_data]
-        all_ents = [tuple(y) for x in all_ents for y in x]
-        f_linked_sent = ProgramTree.fix_linked_sent(linked_sent, all_ents, cols)
-        tls = ProgramTree.transform_linked_sent(f_linked_sent, cols, col2type, masked_val)
-        new_results.append((table_name, og_sent, linked_sent, f_linked_sent, masked_val,
-                            mem_str, mem_num, mem_data, tls))
+
+        tls = ProgramTree.transform_linked_sent(masked_sent, mapping, cols, col2type, masked_val)
+        new_results.append((table_name, og_sent, linked_sent, masked_val, mem_str, mem_num, mem_data, tls))
     with open("data/plstm_test.json", 'w') as f:
         json.dump(new_results, f, indent=2)
     return

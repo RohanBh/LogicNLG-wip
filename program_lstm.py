@@ -18,7 +18,7 @@ from tqdm.auto import tqdm
 from transformers import GPT2Model, GPT2Tokenizer
 
 from APIs import non_triggers
-from l2t_api import APIs, memory_arg_funcs, check_if_accept, obj_compare
+from l2t_api import APIs, memory_arg_funcs, check_if_accept
 from l2t_parse_fill import Parser, split, get_col_types
 
 NEW_TOKENS = ['hfuewjlr', 'cotbwpry', 'gyhulcem', 'uzdfpzvk', 'gifyoazr', 'ogvrhlel', 'hrcdtosp', 'yvyzclyh',
@@ -116,8 +116,9 @@ def inc_precision(thresh=3):
         return all_headers
 
     def get_new_entry(en, cl, c2t):
-        # TODO: Add the transformed sentence in the data itself
-        return *en[:7], cl, c2t, en[-1]
+        masked_sent, mapping = parser.fake_parse(en[0], en[1])
+        ts = ProgramTree.transform_linked_sent(masked_sent, mapping, cl, c2t, en[3])
+        return *en[:3], ts, en[3:7], cl, c2t, en[-1]
 
     def get_linked_hdrs(linked_sent, cols):
         inside = False
@@ -261,10 +262,10 @@ def get_val(pos_tensor):
 
 
 class ProgramTree:
-    def __init__(self, logic_json, linked_sent=None, cols=None, col2type=None, masked_val=None):
+    def __init__(self, logic_json, masked_ls=None, mapping=None, cols=None, col2type=None, masked_val=None):
         self.func = logic_json['func']
         self.logic_json = logic_json
-        self.sent = ProgramTree.transform_linked_sent(linked_sent, cols, col2type, masked_val)
+        self.sent = ProgramTree.transform_linked_sent(masked_ls, mapping, cols, col2type, masked_val)
         self._actions = None
 
     @property
@@ -293,8 +294,8 @@ class ProgramTree:
         return self._actions
 
     @classmethod
-    def from_str(cls, logic_str, linked_sent=None, cols=None, col2type=None, masked_val=None):
-        return cls(cls.get_logic_json_from_str(logic_str), linked_sent, cols, col2type, masked_val)
+    def from_str(cls, logic_str, masked_ls=None, mapping=None, cols=None, col2type=None, masked_val=None):
+        return cls(cls.get_logic_json_from_str(logic_str), masked_ls, mapping, cols, col2type, masked_val)
 
     @staticmethod
     def _sanitize(logic_json):
@@ -374,6 +375,19 @@ class ProgramTree:
           [HDR_START] str ^# chassis #^ uzdfpzvk [HDR_END] , [HDR_START] str ^# engine #^ gifyoazr [HDR_END] ,
           [HDR_START] num ^# finish #^ ogvrhlel [HDR_END] , [HDR_START] str ^# entrant #^ hrcdtosp [HDR_END]  .
         """
+
+        def _compare(_a, _b):
+            _a = str(_a)
+            _b = str(_b)
+            if _a == _b:
+                return True
+            try:
+                _a = float(_a)
+                _b = float(_b)
+                return _a == _b
+            except:
+                return False
+
         if any(x is None for x in [masked_ls, mapping, cols, col2type]):
             return None
         new_sent = []
@@ -386,12 +400,15 @@ class ProgramTree:
                 new_sent.append(tok)
                 continue
             v, (i, j) = mapping[tok]
-            # -5 nonlink, -4 count, -3 compute, -2 nth, -1 title
+            # -5 nonlink, -4 count, -3 compute, -7 nth, -1 title
             if i in [-5, -4]:
                 comp_msk_val_0 = 'msk_nonlink_num' if i == -5 else 'msk_input'
-                if masked_val is not None and masked_val[0] == comp_msk_val_0 and obj_compare(v, masked_val[1], True):
+                if masked_val is not None and masked_val[0] == comp_msk_val_0 and _compare(v, masked_val[1]):
                     new_sent.append('[MASK]')
-            elif i == -2:
+            elif i == -3 and j == -3:
+                if masked_val is not None and _compare(v, str(masked_val[1])):
+                    new_sent.append('[MASK]')
+            elif i == -7:
                 new_sent.append(f'[N_START] ^# {v} #^ {NEW_TOKENS[tag_ctr]} [N_END]')
                 tag_ctr += 1
                 tag_ctr %= len(NEW_TOKENS)
@@ -406,7 +423,7 @@ class ProgramTree:
             else:
                 # -3, normal
                 col_type = col2type[j]
-                if masked_val is not None and cols[j] == masked_val[0][4:] and v == str(masked_val[1]):
+                if masked_val is not None and cols[j] == masked_val[0][4:] and _compare(v, str(masked_val[1])):
                     new_sent.append('[MASK]')
                 else:
                     new_sent.append(f'[ENT_START] {col_type} ^# {cols[j]} ;;; {v} #^'
@@ -1309,16 +1326,10 @@ class ProgramLSTM(nn.Module):
 
         all_programs = []
         for entry in data:
-            linked_sent = entry[2]
-            try:
-                all_ents = [entry[4], entry[5], entry[6]]
-                all_ents = [tuple(y) for x in all_ents for y in x]
-                linked_sent = ProgramTree.fix_linked_sent(linked_sent, all_ents, entry[7])
-            except:
-                pass
             for prog in entry[-1]:
-                col2type = {int(k): v for k, v in entry[-2].items()}
-                all_programs.append(ProgramTree.from_str(prog, linked_sent, entry[-3], col2type, entry[3]))
+                pt = ProgramTree.from_str(prog)
+                pt.sent = entry[3]
+                all_programs.append(pt)
 
         recording_time = datetime.now().strftime('%m_%d_%H_%M')
         optimizer = optim.Adam(model.parameters(), args.lr)
@@ -1388,18 +1399,8 @@ class ProgramLSTM(nn.Module):
 
         train_data = []
         for entry in data:
-            linked_sent = entry[2]
-            try:
-                all_ents = [entry[4], entry[5], entry[6]]
-                all_ents = [tuple(y) for x in all_ents for y in x]
-                linked_sent = ProgramTree.fix_linked_sent(linked_sent, all_ents, entry[7])
-            except:
-                pass
-            for prog in entry[-1]:
-                col2type = {int(k): v for k, v in entry[-2].items()}
-                prog_tree = ProgramTree.from_str(prog, linked_sent, entry[-3], col2type, entry[3])
-                mask_val = (entry[3][0], str(entry[3][1]))
-                train_data.append((prog_tree.sent, entry[0], mask_val))
+            mask_val = (entry[4][0], str(entry[4][1]))
+            train_data.append((entry[3], entry[0], mask_val))
 
         recording_time = datetime.now().strftime('%m_%d_%H_%M')
         optimizer = optim.Adam(model.parameters(), args.lr)
