@@ -865,8 +865,6 @@ class ProgramLSTM(nn.Module):
         self.action_readout = lambda q: F.linear(
             self.query_vec_to_action_embed(q), self.action_embed.weight, self.action_readout_b)
 
-        self.value_linear = nn.Linear(attn_vec_size, 1, bias=False)
-
         self.dropout = nn.Dropout(dropout)
 
         if device_str != 'cpu':
@@ -1426,6 +1424,7 @@ class ProgramLSTM(nn.Module):
         device = torch.device(device_str)
         # pick warm-start model
         model = ProgramLSTM.load(args.model_path, args.cuda)
+        model.value_linear = nn.Linear(model.attn_vec_size, 1, bias=False)
         model.to(device)
         model.train()
 
