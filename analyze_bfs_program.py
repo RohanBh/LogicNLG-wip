@@ -116,6 +116,8 @@ def show_dist_2(fname):
         prog_type = prog.split('{')[0].strip()
         if prog_type == 'hop':
             prog_type = prog.split('{')[1].strip()
+            if '=' in prog_type and '/False' in prog_type:
+                prog_type = 'hop'
         if prog_type not in counter:
             counter[prog_type] = 0
         if prog_type not in tot_prog_dict:
@@ -131,7 +133,7 @@ def show_dist_2(fname):
 
 
 def main2():
-    fname = 'out_49.json'
+    fname = 'out_rb_079.json'
     print_check_proportion(fname)
     show_dist_2(fname)
     return

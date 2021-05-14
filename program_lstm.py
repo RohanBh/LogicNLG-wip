@@ -865,6 +865,8 @@ class ProgramLSTM(nn.Module):
         self.action_readout = lambda q: F.linear(
             self.query_vec_to_action_embed(q), self.action_embed.weight, self.action_readout_b)
 
+        self.value_linear = nn.Linear(attn_vec_size, 1, bias=False)
+
         self.dropout = nn.Dropout(dropout)
 
         if device_str != 'cpu':
@@ -1112,7 +1114,7 @@ class ProgramLSTM(nn.Module):
         batch_size = input_ids.size(0)
         finished = [False for _ in range(batch_size)]
         finished_action_idx = [None for _ in range(batch_size)]
-        log_probs = []
+        log_probs, values = [], []
         if not train_rl:
             self.eval()
 
@@ -1209,6 +1211,7 @@ class ProgramLSTM(nn.Module):
                         next_func = action_probs.sample()
                         log_prob = action_probs.log_prob(next_func)
                         log_probs.append(log_prob)
+                        values.append(self.value_linear(attn_t[batch_id]))
                     hist_act_row.append(('func', next_func.item()))
                 else:
                     # create copy_mask which has 1 where we can copy entities
@@ -1245,7 +1248,7 @@ class ProgramLSTM(nn.Module):
                     copy_mask[token_pos_list] = 1
                     copy_mask = torch.from_numpy(copy_mask).bool()
                     if not torch.any(copy_mask) and train_rl:
-                        return None, None
+                        return None, log_probs, values
                     if self.device != torch.device('cpu'):
                         copy_mask = copy_mask.cuda()
                     # (1, 1, seq_len)
@@ -1261,6 +1264,7 @@ class ProgramLSTM(nn.Module):
                         next_token_idx = action_probs.sample()
                         log_prob = action_probs.log_prob(next_token_idx)
                         log_probs.append(log_prob)
+                        values.append(self.value_linear(attn_t[batch_id]))
                     hist_act_row.append(('tok', self.tokenizer.decode(input_ids[batch_id][next_token_idx])))
 
             history_actions.append(hist_act_row)
@@ -1309,7 +1313,7 @@ class ProgramLSTM(nn.Module):
         if not train_rl:
             return new_history_actions
         else:
-            return new_history_actions, log_probs
+            return new_history_actions, log_probs, values
 
     def save(self, path):
         path = Path(path)
@@ -1433,38 +1437,54 @@ class ProgramLSTM(nn.Module):
             mask_val = (entry[4][0], str(entry[4][1]))
             train_data.append((entry[3], entry[0], mask_val))
 
+        all_programs = []
+        for entry in data:
+            for prog in entry[-1]:
+                pt = ProgramTree.from_str(prog)
+                pt.sent = entry[3]
+                all_programs.append(pt)
+
         recording_time = datetime.now().strftime('%m_%d_%H_%M')
         optimizer = optim.Adam(model.parameters(), args.lr)
 
-        episode_idx = start_episode = 0
-        n_episode_idx = None
+        episode_idx = n_episode_idx = 0
 
         if args.resume_train:
             checkpoint = torch.load(args.ckpt_path)
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             recording_time = checkpoint['recording_time']
             n_episode_idx = checkpoint['curr_episode']
-            start_episode = checkpoint['episodes_finished'] + 1
 
         tb_writer = SummaryWriter(log_dir=f'tensorboard/p-lstm/{recording_time}')
         score_history = []
         random.seed(32)
         while True:
             random.shuffle(train_data)
-            for idx, (trans_sent, table_name, mask_val) in tqdm(
-                    enumerate(train_data[start_episode:]), total=len(train_data) - start_episode):
+            for trans_sent, table_name, mask_val in tqdm(train_data):
                 episode_idx += 1
-                if n_episode_idx is not None and episode_idx <= n_episode_idx:
+                if episode_idx <= n_episode_idx:
                     continue
                 # print(f"Starting episode {episode_idx}")
 
-                padded_sequences = model.tokenizer(trans_sent, padding=True, truncation=True, return_tensors="pt")
-                model_out, log_probs = model.parse(padded_sequences, args.max_actions, True)
-                if model_out is None and log_probs is None:
-                    # skip when no copy tokens can be found
-                    continue
+                if torch.rand(1).item() * (1 - episode_idx / args.episodes) > 0.5:
+                    batch_progs = np.random.choice(all_programs, args.batch_size, replace=False)
+                    optimizer.zero_grad()
+                    ret_val = model.score(batch_progs)
+                    loss = -ret_val[0]
+                    loss = torch.mean(loss)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 5.)
+                    optimizer.step()
 
-                act_list = model_out[0]
+                padded_sequences = model.tokenizer(trans_sent, padding=True, truncation=True, return_tensors="pt")
+                model_out, log_probs, values = model.parse(padded_sequences, args.max_actions, True)
+                if model_out is None:
+                    # reward -1 when no copy tokens can be found
+                    act_list = None
+                else:
+                    act_list = model_out[0]
+
+                ret_val = None
                 try:
                     logic_json = ProgramTree.get_logic_json_from_action_list(act_list, trans_sent)
                     ret_val = ProgramTree.execute(table_name, logic_json)
@@ -1475,22 +1495,48 @@ class ProgramLSTM(nn.Module):
                 rewards = [0] * len(log_probs)
                 if is_accepted:
                     rewards[-1] = 1
+                elif ret_val is not None:
+                    rewards[-1] = 0
                 else:
                     rewards[-1] = -1
 
-                policy_loss = []
-                returns = []
                 R = 0
-                for r in rewards[::-1]:
-                    R = r + 1 * R
-                    returns.insert(0, R)
-                returns = torch.FloatTensor(returns)
-                # returns = (returns - returns.mean()) / (returns.std(unbiased=False) + eps)
-                for log_prob, R in zip(log_probs, returns):
-                    policy_loss.append(-log_prob * R)
+                returns = [model.new_tensor([0])] * len(log_probs)
+                advantage = model.new_tensor([0])
+                advantages = [model.new_tensor([0])] * len(log_probs)
+                for t in reversed(range(len(log_probs))):
+                    # rewards, masks, actions, policies, values = steps[t]
+                    reward, curr_value = rewards[t], values[t]
+                    next_value = values[t + 1] if t + 1 < len(log_probs) else 0
+                    R = reward + R
+                    deltas = reward + next_value - curr_value
+                    advantage = advantage + deltas
+                    advantages[t] = advantage
+                    returns[t] = R
+                    # out[t] = actions, policies, values, returns, advantages
+                advantages = torch.cat(advantages, dim=0)
+                returns = torch.cat(returns, dim=0)
+
+                policy_loss = (-log_probs * advantages).sum()
+                value_loss = (.5 * (values - returns) ** 2.).sum()
+
+                loss = policy_loss + value_loss * args.value_coeff
+
+                # policy_loss = []
+                # returns = []
+                # R = 0
+                # for r in rewards[::-1]:
+                #     R = r + 1 * R
+                #     returns.insert(0, R)
+                # returns = torch.FloatTensor(returns)
+                # # returns = (returns - returns.mean()) / (returns.std(unbiased=False) + eps)
+                # for log_prob, R in zip(log_probs, returns):
+                #     policy_loss.append(-log_prob * R)
+                # policy_loss = torch.stack(policy_loss).sum()
+                # policy_loss.backward()
+
                 optimizer.zero_grad()
-                policy_loss = torch.stack(policy_loss).sum()
-                policy_loss.backward()
+                loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 5.)
                 optimizer.step()
 
@@ -1750,8 +1796,11 @@ def init_plstm_arg_parser():
                         type=str, help="Run only on the given sentence for debugging")
 
     # rl args
+    # batch_size, max_actions,
     parser.add_argument('--episodes', default=10000, type=int, help="Number of episodes to train the model with RL")
     parser.add_argument('--avg_hist', default=100, type=int, help="Number of episodes to take avg of while logging")
+    parser.add_argument('--value_coeff', default=0.5, type=float, help="Coeff for value loss")
+
     return parser.parse_args()
 
 
@@ -1762,7 +1811,7 @@ if __name__ == '__main__':
     # tmp_test()
     args = init_plstm_arg_parser()
     # ProgramLSTM.train_program_lstm(args)
-    # ProgramLSTM.train_rl_program_lstm(args)
-    ProgramLSTM.test_program_lstm(args)
+    ProgramLSTM.train_rl_program_lstm(args)
+    # ProgramLSTM.test_program_lstm(args)
     # 177, 202, 272, 301, 363, 364, 383
     # print(get_entry(177))
