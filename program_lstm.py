@@ -1499,7 +1499,7 @@ class ProgramLSTM(nn.Module):
                 else:
                     rewards[-1] = -1
 
-                R = 0
+                R = model.new_tensor([0])
                 returns = [model.new_tensor([0])] * len(log_probs)
                 advantage = model.new_tensor([0])
                 advantages = [model.new_tensor([0])] * len(log_probs)
@@ -1515,6 +1515,8 @@ class ProgramLSTM(nn.Module):
                     # out[t] = actions, policies, values, returns, advantages
                 advantages = torch.cat(advantages, dim=0)
                 returns = torch.cat(returns, dim=0)
+                log_probs = torch.stack(log_probs)
+                values = torch.cat(values, dim=0)
 
                 policy_loss = (-log_probs * advantages).sum()
                 value_loss = (.5 * (values - returns) ** 2.).sum()
@@ -1789,6 +1791,7 @@ def init_plstm_arg_parser():
                         type=str, help="Load checkpoint from this path")
 
     # val args
+    parser.add_argument('--train_set', action='store_true', default=False)
     parser.add_argument('--out_id', default='', type=str, help='Output id for storing model outputs')
     parser.add_argument('--max_actions', default=50, type=int, help="Max actions to consider while parsing")
     parser.add_argument('--dbg_sent', default='',
