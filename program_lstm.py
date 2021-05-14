@@ -714,7 +714,7 @@ class ProgramTreeBatch:
                             self.generic_copy_mask[curr_ac_ix, pt_id, 0] = 1.
 
                         copy_utterance = '^# ' + action_info[1] + ' #^'
-                        copy_utterance_toks = tokenizer.encode(copy_utterance, add_special_tokens=True)
+                        copy_utterance_toks = tokenizer.encode(copy_utterance, add_special_tokens=False)
                         tok_pos_list = extract2(pt_id, copy_utterance_toks)
                         self.copy_token_idx_mask[curr_ac_ix, pt_id, tok_pos_list] = 1.
                         copy_mask = 1
