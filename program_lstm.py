@@ -1544,7 +1544,7 @@ class ProgramLSTM(nn.Module):
 
             sent_list = [e[-1] for e in entries]
             table_names = [e[0] for e in entries]
-            masked_vals = [e[4] for e in entries]
+            masked_vals = [e[3] for e in entries]
             og_sent_list = [e[1] for e in entries]
 
             padded_sequences = model.tokenizer(sent_list, padding=True, truncation=True, return_tensors="pt")
@@ -1761,8 +1761,8 @@ if __name__ == '__main__':
     # inc_precision()
     # tmp_test()
     args = init_plstm_arg_parser()
-    ProgramLSTM.train_program_lstm(args)
+    # ProgramLSTM.train_program_lstm(args)
     # ProgramLSTM.train_rl_program_lstm(args)
-    # ProgramLSTM.test_program_lstm(args)
+    ProgramLSTM.test_program_lstm(args)
     # 177, 202, 272, 301, 363, 364, 383
     # print(get_entry(177))
