@@ -136,7 +136,7 @@ def inc_precision(thresh=3, test_sent=''):
     def get_new_entry(en, cl, c2t):
         masked_sent, mapping = parser.fake_parse(en[0], en[1])
         ts = ProgramTree.transform_linked_sent(masked_sent, mapping, cl, c2t, en[3])
-        return *en[:3], ts, en[3:7], cl, c2t, en[-1]
+        return *en[:3], ts, *en[3:7], cl, c2t, en[-1]
 
     def get_linked_hdrs(linked_sent, cols):
         inside = False
@@ -1576,8 +1576,8 @@ class ProgramLSTM(nn.Module):
         model = ProgramLSTM.load(args.model_path, args.cuda)
         model.to(device)
         model.eval()
-
-        with open('data/plstm_test.json') as fp:
+        in_fname = 'data/programs_filtered.json' if args.train_set else 'data/plstm_test.json'
+        with open(in_fname) as fp:
             data = json.load(fp)
 
         results = []
@@ -1589,9 +1589,14 @@ class ProgramLSTM(nn.Module):
                     continue
             entries = data[idx:idx + args.batch_size]
 
-            sent_list = [e[-1] for e in entries]
+            if args.train_set:
+                i1, i2 = 3, 4
+            else:
+                i1, i2 = -1, 3
+
+            sent_list = [e[i1] for e in entries]
             table_names = [e[0] for e in entries]
-            masked_vals = [e[3] for e in entries]
+            masked_vals = [e[i2] for e in entries]
             og_sent_list = [e[1] for e in entries]
 
             padded_sequences = model.tokenizer(sent_list, padding=True, truncation=True, return_tensors="pt")
@@ -1791,7 +1796,8 @@ def init_plstm_arg_parser():
                         type=str, help="Load checkpoint from this path")
 
     # val args
-    parser.add_argument('--train_set', action='store_true', default=False)
+    parser.add_argument('--train_set', action='store_true', default=False,
+                        help='Whether to find the coverage on the train set')
     parser.add_argument('--out_id', default='', type=str, help='Output id for storing model outputs')
     parser.add_argument('--max_actions', default=50, type=int, help="Max actions to consider while parsing")
     parser.add_argument('--dbg_sent', default='',
@@ -1813,7 +1819,7 @@ if __name__ == '__main__':
     # tmp_test()
     args = init_plstm_arg_parser()
     # ProgramLSTM.train_program_lstm(args)
-    ProgramLSTM.train_rl_program_lstm(args)
-    # ProgramLSTM.test_program_lstm(args)
+    # ProgramLSTM.train_rl_program_lstm(args)
+    ProgramLSTM.test_program_lstm(args)
     # 177, 202, 272, 301, 363, 364, 383
     # print(get_entry(177))
