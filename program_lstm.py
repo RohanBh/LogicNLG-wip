@@ -16,7 +16,8 @@ import torch.nn.functional as F
 from torch import nn, optim, autograd
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
-from transformers import GPT2Model, GPT2Tokenizer, RobertaTokenizer, RobertaModel, BertTokenizer, BertModel
+from transformers import GPT2Model, GPT2Tokenizer, RobertaTokenizer, RobertaModel, BertTokenizer, BertModel, AdamW, \
+    get_linear_schedule_with_warmup
 
 from APIs import non_triggers
 from l2t_api import APIs, memory_arg_funcs, check_if_accept
@@ -1371,7 +1372,10 @@ class ProgramLSTM(nn.Module):
                 all_programs.append(pt)
 
         recording_time = datetime.now().strftime('%m_%d_%H_%M')
-        optimizer = optim.Adam(model.parameters(), args.lr)
+        optimizer = AdamW(model.parameters(), args.lr)
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer, num_warmup_steps=args.warmup_steps,
+            num_training_steps=args.epochs * len(all_programs) // args.batch_size + 1)
 
         global_step = avg_loss = start_epoch = 0
 
@@ -1381,9 +1385,10 @@ class ProgramLSTM(nn.Module):
             recording_time = checkpoint['recording_time']
             global_step = checkpoint['total_steps']
             start_epoch = checkpoint['epochs_finished'] + 1
-            # scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
         tb_writer = SummaryWriter(log_dir=f'tensorboard/p-lstm/{recording_time}')
+        print("Recording Time:", recording_time)
         model.train()
 
         for epoch_idx in range(start_epoch, args.epochs):
@@ -1404,6 +1409,7 @@ class ProgramLSTM(nn.Module):
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 5.)
                 optimizer.step()
+                scheduler.step()
 
                 if idx % args.every == 0 and idx > 0:
                     tb_writer.add_scalar("Avg loss", avg_loss / args.every, global_step)
@@ -1414,7 +1420,8 @@ class ProgramLSTM(nn.Module):
                     'recording_time': recording_time,
                     'total_steps': global_step,
                     'epochs_finished': epoch_idx,
-                    'optimizer_state_dict': optimizer.state_dict()},
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict()},
                     save_path / f'ws_ckpt_{epoch_idx:03}.pt')
                 model.save(save_path / f'ws_model_{epoch_idx:03}.pt')
         tb_writer.flush()
@@ -1791,6 +1798,7 @@ def init_plstm_arg_parser():
     parser.add_argument('--epochs', default=10, type=int, help="Number of epochs to train the model")
     parser.add_argument('--batch_size', default=8, type=int, help="The batch size to use during training")
     parser.add_argument('--lr', default=1e-4, type=float, help="Learning Rate of adam")
+    parser.add_argument('--warmup_steps', default=5000, type=int, help="Number of steps for increasing lr to max")
     parser.add_argument('--every', default=250, type=int, help="Log after every n examples")
     parser.add_argument('--save_every', default=2, type=int, help="Save after every n epochs")
     parser.add_argument('--resume_train', action='store_true', default=False, help="Resume from save model epoch")
