@@ -118,7 +118,7 @@ def sample_sequence(model, length, context, args, num_samples=1, temperature=1, 
                 next_token_logits = outputs[:, -1, :] / (temperature if temperature > 0 else 1.)
 
             # next_token_logits[:, generated[-1].tolist()] /= repetition
-            # repetition is the token ID which shouldn't be repeated twice in any text.
+            # repetition is the token ID which shouldn't be repeated twice contiguously in any text.
             if repetition is not None:
                 for b in range(batch_size):
                     if generated[:, -1][b].item() == repetition:
