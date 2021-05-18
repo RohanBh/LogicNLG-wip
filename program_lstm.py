@@ -424,9 +424,13 @@ class ProgramTree:
                 comp_msk_val_0 = 'msk_nonlink_num' if i == -5 else 'msk_input'
                 if masked_val is not None and masked_val[0] == comp_msk_val_0 and _compare(v, masked_val[1]):
                     new_sent.append('[MASK]')
+                else:
+                    new_sent.append(str(v))
             elif i == -3 and j == -3:
                 if masked_val is not None and _compare(v, str(masked_val[1])):
                     new_sent.append('[MASK]')
+                else:
+                    new_sent.append(str(v))
             elif i == -7:
                 new_sent.append(f'[N_START] ^# {v} #^ {NEW_TOKENS[tag_ctr]} [N_END]')
                 tag_ctr += 1
@@ -1335,6 +1339,8 @@ class ProgramLSTM(nn.Module):
         plstm = cls(action_embed_size, field_embed_size, decoder_hidden_size,
                     attn_vec_size, dropout, device_str, gpt_model)
         saved_state = params['state_dict']
+        if 'rl' in model_path:
+            plstm.value_linear = nn.Linear(plstm.attn_vec_size, 1, bias=False)
         plstm.load_state_dict(saved_state)
         if cuda:
             plstm = plstm.cuda()
@@ -1819,7 +1825,7 @@ if __name__ == '__main__':
     # tmp_test()
     args = init_plstm_arg_parser()
     # ProgramLSTM.train_program_lstm(args)
-    # ProgramLSTM.train_rl_program_lstm(args)
-    ProgramLSTM.test_program_lstm(args)
+    ProgramLSTM.train_rl_program_lstm(args)
+    # ProgramLSTM.test_program_lstm(args)
     # 177, 202, 272, 301, 363, 364, 383
     # print(get_entry(177))

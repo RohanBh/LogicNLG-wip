@@ -1325,7 +1325,7 @@ class Parser(object):
         table = pandas.read_csv(file, delimiter="#")
         return table
 
-    def entity_link(self, table_name, lemmatized_sent, pos_tags):
+    def entity_link(self, table_name, lemmatized_sent, pos_tags, ret_dict=False):
         # Maps all types of tokens (normal & accent word) in the tables to their positions
         backbone = {}
         # Like backbone: But only maps the uni-decoded word (accents removed) to their pos
@@ -1403,6 +1403,8 @@ class Parser(object):
 
         sent, tags = merge_strings(sent, tags)
 
+        if ret_dict:
+            return sent, tags, recover_dicts
         return sent, tags
 
     def get_table2vecs(self, table_name):
@@ -1810,11 +1812,13 @@ class Parser(object):
                                   mem_num, mem_date, head_str, head_num, head_date, masked_val, 7)
         return res[-1]
 
-    def normalize(self, sent):
+    def normalize(self, sent, ret_dict=False):
         sent = sent.lower()
         sent = sent.replace(',', '')
         sent = replace_number(sent)
-        sent, _, pos_tags = self.get_lemmatize(sent, True)
+        sent, recover_dict, pos_tags = self.get_lemmatize(sent, True)
+        if ret_dict:
+            return sent, pos_tags, recover_dict
         return sent, pos_tags
 
     def get_aux_objs_mhle(self, mem_num, mem_str, non_linked_num):
@@ -1905,6 +1909,14 @@ class Parser(object):
         ret_val = self.initialize_buffer(table_name, linked_sent, pos, raw_sent)
         masked_sent, mapping = ret_val[0], ret_val[-1]
         return masked_sent, mapping
+
+    def fake_parse_2(self, table_name, og_sent):
+        sent, pos_tags, rec_dict_sent = self.normalize(og_sent, ret_dict=True)
+        raw_sent = " ".join(sent)
+        linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
+        ret_val = self.initialize_buffer(table_name, linked_sent, pos, raw_sent)
+        masked_sent, _, _, _, head_str, head_num, head_date, _, mapping = ret_val
+        return masked_sent, mapping, rec_dict_sent, head_str + head_num + head_date
 
     def parse(self, table_name, og_sent, logic_json, action, debug=False):
         sent, pos_tags = self.normalize(og_sent)
