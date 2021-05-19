@@ -398,7 +398,7 @@ class ProgramTree:
     def transform_linked_sent(masked_ls, mapping, cols, col2type, masked_val=None):
         """
         e.g. linked sent:
-        #mark donohue;-1,-1# have a higher #start;0,3# in #1969;1,0# than he do in #1970;2,0# .
+        <TITLE> have a higher <ENTITY1> in <ENTITY2> than he do in <ENITTY3> .
 
         transformed sent:
         [TITLE_START] mark donohue [TITLE_END] have a higher [HDR_START] num ^# start #^ hfuewjlr [HDR_END] in [MASK]

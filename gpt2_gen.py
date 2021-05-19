@@ -14,8 +14,8 @@ from tqdm.auto import tqdm
 from transformers import GPT2Tokenizer, GPT2LMHeadModel, AdamW, get_linear_schedule_with_warmup
 
 from DataLoader import Dataloader
-from l2t_parse_fill import Parser
-from program_lstm import _compare
+from l2t_parse_fill import Parser, get_col_types
+from program_lstm import _compare, ProgramTree, ProgramLSTM
 
 
 def create_out_sent(masked_ls, mapping, cols, masked_val, recover_dict):
@@ -91,9 +91,37 @@ def create_train_data():
     return
 
 
+def create_test_data():
+    with open('data/plstm_test.json') as fp:
+        data = json.load(fp)
+
+    parser = Parser("data/l2t/all_csv")
+    out_data = {}
+
+    for entry in tqdm(data):
+        table_name, og_sent = entry[:2]
+        masked_sent, mapping, rec_dict_sent, all_cols = parser.fake_parse_2(table_name, og_sent)
+        table = pd.read_csv(f'data/l2t/all_csv/{entry[0]}', delimiter="#")
+        cols = table.columns.tolist()
+        all_cols = [idx for idx, col in enumerate(cols) if col in all_cols]
+        title = parser.title_mapping[table_name]
+
+        if table_name not in out_data:
+            out_data[table_name] = []
+
+        out_data[table_name].append((
+            og_sent, all_cols, title
+        ))
+
+    with open('data/test_gpt2_lm.json', 'w') as fp:
+        json.dump(out_data, fp, indent=2)
+
+    return
+
+
 class GPT2MaskSentDataset(Dataloader):
-    def __init__(self, train_name, tokenizer, batch_size=5, max_len=800, window_size=15):
-        super(GPT2MaskSentDataset, self).__init__(None, None, None)
+    def __init__(self, train_name, val_name, test_name, tokenizer, batch_size=5, max_len=800, window_size=15):
+        super(GPT2MaskSentDataset, self).__init__(train_name, val_name, test_name)
         if train_name:
             with open(train_name, 'r') as f:
                 self.train = json.load(f)
@@ -157,23 +185,23 @@ class GPT2MaskSentDataset(Dataloader):
         table = pd.read_csv('data/l2t/all_csv/' + table_id, '#')
         cols = table.columns
 
-        seqs = []
+        # seqs = []
         descs = []
-        seq_masks = []
+        # seq_masks = []
 
         for e in entry:
-            seqs.append(self.tokenizer.encode(e[3], add_special_tokens=False))
-            seq_masks.append([1] * len(seqs[-1]))
+            # seqs.append(self.tokenizer.encode(e[3], add_special_tokens=False))
+            # seq_masks.append([1] * len(seqs[-1]))
 
             table_summary = ""
             for i in range(len(table)):
                 table_summary += 'In row {} , '.format(i + 1)
                 for col_idx in e[1]:
-                    if isinstance(table.iloc[i][cols[col_idx]], str):
-                        entity = map(lambda x: x.capitalize(), table.iloc[i, cols[col_idx]].split(' '))
+                    if isinstance(table.iloc[i, col_idx], str):
+                        entity = map(lambda x: x.capitalize(), table.iloc[i, col_idx].split(' '))
                         entity = ' '.join(entity)
                     else:
-                        entity = str(table.iloc[i, cols[col_idx]])
+                        entity = str(table.iloc[i, col_idx])
 
                     table_summary += 'the {} is {} , '.format(cols[col_idx], entity)
                 table_summary = table_summary[:-3] + ' . '
@@ -186,23 +214,24 @@ class GPT2MaskSentDataset(Dataloader):
 
             descs.append(self.tokenizer.convert_tokens_to_ids(t_sum_pref_toks + t_sum_toks))
 
-        length = max([len(_) for _ in seqs]) + 1
-
-        for i in range(len(seqs)):
-            seqs[i] += (length - len(seqs[i])) * [self.tokenizer.pad_token_id]
-            seq_masks[i] = seq_masks[i] + [1] + (length - len(seq_masks[i]) - 1) * [0]
-        seqs = torch.LongTensor(seqs)
-        seq_masks = torch.FloatTensor(seq_masks)
+        # length = max([len(_) for _ in seqs]) + 1
+        #
+        # for i in range(len(seqs)):
+        #     seqs[i] += (length - len(seqs[i])) * [self.tokenizer.pad_token_id]
+        #     seq_masks[i] = seq_masks[i] + [1] + (length - len(seq_masks[i]) - 1) * [0]
+        # seqs = torch.LongTensor(seqs)
+        # seq_masks = torch.FloatTensor(seq_masks)
 
         length = max([len(_) for _ in descs]) + 1
         for i in range(len(descs)):
             descs[i] = (length - len(descs[i])) * [self.tokenizer.pad_token_id] + descs[i]
         descs = torch.LongTensor(descs)
 
-        inputs = seqs[:, :-1]
-        outputs = seqs
+        # inputs = seqs[:, :-1]
+        # outputs = seqs
 
-        return inputs, outputs, seq_masks, descs
+        # return table_id, (inputs, outputs, seq_masks, descs)
+        return table_id, descs
 
 
 class GPT2LM(nn.Module):
@@ -218,6 +247,8 @@ class GPT2LM(nn.Module):
         self.model.resize_token_embeddings(len(self.tokenizer))
         self.model.to(self.device)
         self.criterion = nn.CrossEntropyLoss(reduction='none', ignore_index=-1)
+        self.parser = None
+        return
 
     def forward(self, inputs):
         return self.model(inputs)
@@ -260,7 +291,7 @@ class GPT2LM(nn.Module):
         model.to(device)
         model.train()
 
-        dataset = GPT2MaskSentDataset('data/train_gpt2_lm.json', model.tokenizer,
+        dataset = GPT2MaskSentDataset('data/train_gpt2_lm.json', None, None, model.tokenizer,
                                       args.batch_size, args.max_len, window_size=50)
 
         optimizer = AdamW(model.parameters(), args.lr)
@@ -341,7 +372,7 @@ class GPT2LM(nn.Module):
 
         with torch.no_grad():
             for _ in range(max_len):
-                outputs = model(generated)
+                outputs = model(generated).logits
                 next_token_logits = outputs[:, -1, :]
 
                 # Once a [MASK] is generated, don't generate it again
@@ -374,6 +405,33 @@ class GPT2LM(nn.Module):
             new_strings.append(string)
         return new_strings
 
+    def _get_transformed_mls(self, table_name, sents):
+        # mls stands for masked linked sentence. Eg:
+        # the majority of the [HDR_START] str ^# player #^ hfuewjlr [HDR_END] in the [TITLE_START] 2007 u.s. woman 's
+        # open golf championship [TITLE_END] be from [MASK] . The other headers in this table are:
+        # [HDR_START] num ^# place #^ cotbwpry [HDR_END] , ...
+        """
+        Returns a transformed mls for each input masked sentence
+
+        Args:
+            table_name: The table which is the source for the sentences sents
+            sents: Masked sentences which are output from the GPT2 model
+
+        Returns: List of transformed mls
+        """
+        if self.parser is None:
+            self.parser = Parser("data/l2t/all_csv")
+
+        table = pd.read_csv(f'data/l2t/all_csv/{table_name}', delimiter="#")
+        col2type = get_col_types(table)
+        cols = table.columns.tolist()
+        out_list = []
+        for sent in sents:
+            masked_sent, mapping = self.parser.fake_parse(table_name, sent)
+            tls = ProgramTree.transform_linked_sent(masked_sent, mapping, cols, col2type, None)
+            out_list.append(tls)
+        return out_list
+
     @staticmethod
     def test_program_lstm(args):
         print(args)
@@ -382,33 +440,58 @@ class GPT2LM(nn.Module):
         device_str = 'cuda' if args.cuda else 'cpu'
         device = torch.device(device_str)
 
-        model = GPT2LM.load(args.model_path, args.cuda)
-        model.to(device)
-        model.eval()
+        lm_model = GPT2LM.load(args.model_path, args.cuda)
+        lm_model.to(device)
+        lm_model.eval()
 
-        dataset = GPT2MaskSentDataset('data/test_gpt2_lm.json', model.tokenizer,
+        plstm_parser = ProgramLSTM.load(args.parser_model_path, args.cuda)
+        plstm_parser.to(device)
+        plstm_parser.eval()
+
+        dataset = GPT2MaskSentDataset(None, None, 'data/test_gpt2_lm.json', lm_model.tokenizer,
                                       args.batch_size, args.max_len, window_size=50)
+        out_results = {}
 
         with torch.no_grad():
             for idx in tqdm(range(dataset.test_len()), total=dataset.test_len()):
-                batch = dataset.get_test_data(idx)
-                batch = tuple(t.to(device) for t in batch)
-                trg_inp, trg_out, mask, caption = batch
-                samples = GPT2LM.sample_sequences(model, 50, caption, model.tokenizer.eos_token_id,
-                                                  model.tokenizer.convert_tokens_to_ids('[MASK]'))
+                table_name, caption = dataset.get_test_data(idx)
+                out_results[table_name] = []
+
+                caption = caption.to(device)
+                samples = GPT2LM.sample_sequences(lm_model, 50, caption, lm_model.tokenizer.eos_token_id,
+                                                  lm_model.tokenizer.convert_tokens_to_ids('[MASK]'))
                 samples = samples[:, caption.shape[1]:]
                 samples = samples.cpu().data.numpy()
 
                 intermediate = []
                 for s in samples:
-                    text = model.tokenizer.decode(s, clean_up_tokenization_spaces=True)
-                    text = text[:text.find(model.tokenizer.eos_token)].strip()
+                    text = lm_model.tokenizer.decode(s, clean_up_tokenization_spaces=True)
+                    text = text[:text.find(lm_model.tokenizer.eos_token)].strip()
                     intermediate.append(text)
 
                 result = GPT2LM._clean_str(intermediate)
-                # TODO: You have a list of shape (batch,) of masked statements. Now, call the p-lstm to generate program
-                #  and store its output with the masked sentence in a json file.
+                sent_list = lm_model._get_transformed_mls(table_name, result)
+                padded_sequences = plstm_parser.tokenizer(sent_list, padding=True, truncation=True, return_tensors="pt")
+                with torch.no_grad():
+                    plstm_out = plstm_parser.parse(padded_sequences, args.max_actions)
+                for s_idx, trans_sent in enumerate(sent_list):
+                    act_list = plstm_out[s_idx]
+                    logic_json, ret_val = None, None
+                    try:
+                        logic_json = ProgramTree.get_logic_json_from_action_list(act_list, trans_sent)
+                        ret_val = ProgramTree.execute(table_name, logic_json)
+                    except Exception as err:
+                        pass
+                    try:
+                        ljsonstr = ProgramTree.logic_json_to_str(logic_json)
+                    except:
+                        ljsonstr = None
+                    if ljsonstr is not None:
+                        ljsonstr += f'={ret_val}'
+                    out_results[table_name].append((result[s_idx], ljsonstr))
 
+        with open(save_path / f'out_{args.out_id}.json', 'w') as fp:
+            json.dump(out_results, fp, indent=2)
         return
 
 
@@ -429,10 +512,18 @@ def init_lm_arg_parser():
                         type=str, help="Save model and ckpt in this directory")
     parser.add_argument('--model_path', default='', type=str, help="Load model from this path")
     parser.add_argument('--ckpt_path', default='', type=str, help="Load checkpoint from this path")
+
+    # val args
+    parser.add_argument('--out_id', default='', type=str, help='Output id for storing final outputs')
+    parser.add_argument('--max_actions', default=50, type=int, help="Max actions to consider while parsing")
+    parser.add_argument('--parser_model_path', default='', type=str, help="Load PLSTM model from this path")
+
     return parser.parse_args()
 
 
 if __name__ == '__main__':
     # create_train_data()
+    # create_test_data()
     args = init_lm_arg_parser()
-    GPT2LM.train_lm(args)
+    # GPT2LM.train_lm(args)
+    GPT2LM.test_program_lstm(args)
