@@ -818,7 +818,7 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                 else:
                     continue
 
-            if len(hist[step+1]) > 15000:
+            if len(hist[step + 1]) > 15000:
                 break
         if len(finished) > 150 or time.time() - start_time > 60:
             print()
@@ -2101,7 +2101,7 @@ class Parser(object):
             try:
                 linked_sent, pos = self.entity_link(table_name, sent, pos_tags)
             except AssertionError:
-                return None
+                return None, None
             # mem_str, mem_num, mem_date, head_str, head_num, head_date,
             ret_val = self.initialize_buffer(table_name, linked_sent, pos, raw_sent)
             masked_sent, mem_str, mem_num, mem_date, _, _, _, non_linked_num, mapping = ret_val
@@ -2113,7 +2113,7 @@ class Parser(object):
             if masked_val is None:
                 masked_val = self.mask_highest_lo_entity_2(mem_num, mem_str, non_linked_num, logic_json)
             if masked_val is None:
-                return None
+                return None, None
 
             def get_old_val(_x):
                 return 'tmp_input' if _x == 'msk_input' else _x[4:]
@@ -2134,21 +2134,28 @@ class Parser(object):
                 result = self.run(table_name, raw_sent, masked_sent, pos, mem_str, mem_num,
                                   mem_date, head_str, head_num, head_date, masked_val)
                 c = list(set(result))
-                result = [x for x in c if '/True' in x]
-                ret_val = inputs[0], inputs[1], linked_sent, masked_val, mem_str, mem_num, mem_date, len(c), result
+                result_true = [x for x in c if '/True' in x]
+                ret_val = inputs[0], inputs[1], linked_sent, masked_val, mem_str, mem_num, mem_date, len(c), result_true
+                ret_val_2 = inputs[0], inputs[1], linked_sent, masked_val, mem_str, mem_num, mem_date, c
             else:
                 ret_val = (inputs[0], inputs[1], linked_sent, masked_val,
                            mem_str, mem_num, mem_date, masked_sent, mapping)
+                ret_val_2 = (inputs[0], inputs[1], linked_sent, masked_val,
+                             mem_str, mem_num, mem_date, masked_sent, mapping)
 
             if do_generate:
                 with open('tmp/results/{}.json'.format(formatted_sent), 'w') as f:
                     json.dump(ret_val, f, indent=2)
+                with open('tmp/all_results/{}.json'.format(formatted_sent), 'w') as f:
+                    json.dump(ret_val_2, f, indent=2)
 
-            return ret_val
+            return ret_val, ret_val_2
         else:
             with open('tmp/results/{}.json'.format(formatted_sent), 'r') as f:
                 data = json.load(f)
-            return data
+            with open('tmp/all_results/{}.json'.format(formatted_sent), 'r') as f:
+                data2 = json.load(f)
+            return data, data2
 
 
 def test_1():
@@ -2333,8 +2340,11 @@ def generate_programs():
         list(tqdm(pool.imap_unordered(parser.distribute_parse, args, chunksize=1), total=len(args)))
         results = list(tqdm(pool.map(parser.distribute_parse, args), total=len(args)))
 
+    true_results, all_results = zip(*results)
     with open("data/programs.json", 'w') as f:
-        json.dump(results, f, indent=2)
+        json.dump(true_results, f, indent=2)
+    with open("data/all_programs.json", 'w') as f:
+        json.dump(all_results, f, indent=2)
     return
 
 
