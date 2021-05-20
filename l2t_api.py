@@ -7,64 +7,66 @@ import pandas as pd
 
 from utils import powerset
 
-type2funcs = {'aggregation': {'avg', 'sum'},
-              'comparative': {'diff', 'greater', 'less'},
-              'count': {'count'},
-              'majority': {'all_eq',
-                           'all_greater',
-                           'all_greater_eq',
-                           'all_less',
-                           'all_less_eq',
-                           'all_not_eq',
-                           'all_str_eq',
-                           'most_eq',
-                           'most_greater',
-                           'most_greater_eq',
-                           'most_less',
-                           'most_less_eq',
-                           'most_not_eq',
-                           'most_str_eq',
-                           'most_str_not_eq'},
-              'ordinal': {'nth_argmax', 'nth_min', 'nth_argmin', 'nth_max'},
-              'superlative': {'argmax', 'max', 'argmin', 'min'},
-              'unique': {'only'}
-              }
+# Outdated
+# type2funcs = {'aggregation': {'avg', 'sum'},
+#               'comparative': {'diff', 'greater', 'less'},
+#               'count': {'count'},
+#               'majority': {'all_eq',
+#                            'all_greater',
+#                            'all_greater_eq',
+#                            'all_less',
+#                            'all_less_eq',
+#                            'all_not_eq',
+#                            'all_str_eq',
+#                            'most_eq',
+#                            'most_greater',
+#                            'most_greater_eq',
+#                            'most_less',
+#                            'most_less_eq',
+#                            'most_not_eq',
+#                            'most_str_eq',
+#                            'most_str_not_eq'},
+#               'ordinal': {'nth_argmax', 'nth_min', 'nth_argmin', 'nth_max'},
+#               'superlative': {'argmax', 'max', 'argmin', 'min'},
+#               'unique': {'only'}
+#               }
 
-trigger_words_data = {'all_eq': {'_count': 41, 'all': 39},
-                      'all_greater': {'_count': 22, 'all': 18},
-                      'all_greater_eq': {'_count': 14, 'all': 13, 'at least': 10},
-                      'all_less': {'_count': 4, 'all': 4, 'under': 2},
-                      'all_less_eq': {'_count': 1},
-                      'all_not_eq': {'_count': 1},
-                      'all_str_eq': {'_count': 238, 'all': 218},
-                      'argmax': {'_count': 790, 'highest': 441, 'most': 182},
-                      'argmin': {'_count': 229, 'earliest': 49, 'highest': 28,
-                                 'lowest': 25, 'all': 25, 'least': 16, 'best': 15},
-                      'avg': {'_count': 811, 'average': 754},
-                      'count': {'_count': 1623, 'total': 214},
-                      'diff': {'_count': 104, 'before': 39},
-                      'greater': {'_count': 476, 'higher': 127},
-                      'less': {'_count': 366, 'earlier': 121, 'before': 116},
-                      'max': {'_count': 111, 'highest': 53},
-                      'min': {'_count': 43, 'earliest': 17},
-                      'most_eq': {'_count': 80, 'most': 45, 'majority': 27},
-                      'most_greater': {'_count': 151, 'most': 81, 'majority': 65},
-                      'most_greater_eq': {'_count': 55, 'least': 41, 'most': 30, 'majority': 24},
-                      'most_less': {'_count': 105, 'most': 69, 'majority': 34, 'under': 29, 'before': 19},
-                      'most_less_eq': {'_count': 7, 'majority': 4, 'most': 3},
-                      'most_not_eq': {'_count': 2, 'most': 2},
-                      'most_str_eq': {'_count': 750, 'most': 377, 'majority': 345},
-                      'most_str_not_eq': {'_count': 8, 'most': 5, 'majority': 3},
-                      'nth_argmax': {'_count': 553, 'highest': 359, '2nd': 165,
-                                     'second': 152, 'most': 59, 'third': 53,
-                                     'among': 50, 'last': 39, '3rd': 30, 'all': 29},
-                      'nth_argmin': {'_count': 365, 'second': 110, 'earliest': 102,
-                                     '2nd': 55, 'lowest': 44, 'third': 37},
-                      'nth_max': {'_count': 29, 'highest': 10, 'second': 8, 'third': 5, 'largest': 5, 'newest': 2},
-                      'nth_min': {'_count': 69, 'second': 10, '1st': 9, '3rd': 5, 'third': 4, 'fourth': 4, '2nd': 4},
-                      'only': {'_count': 1277},
-                      'sum': {'_count': 335, 'total': 284, 'combined': 54}
-                      }
+# Outdated
+# trigger_words_data = {'all_eq': {'_count': 41, 'all': 39},
+#                       'all_greater': {'_count': 22, 'all': 18},
+#                       'all_greater_eq': {'_count': 14, 'all': 13, 'at least': 10},
+#                       'all_less': {'_count': 4, 'all': 4, 'under': 2},
+#                       'all_less_eq': {'_count': 1},
+#                       'all_not_eq': {'_count': 1},
+#                       'all_str_eq': {'_count': 238, 'all': 218},
+#                       'argmax': {'_count': 790, 'highest': 441, 'most': 182},
+#                       'argmin': {'_count': 229, 'earliest': 49, 'highest': 28,
+#                                  'lowest': 25, 'all': 25, 'least': 16, 'best': 15},
+#                       'avg': {'_count': 811, 'average': 754},
+#                       'count': {'_count': 1623, 'total': 214},
+#                       'diff': {'_count': 104, 'before': 39},
+#                       'greater': {'_count': 476, 'higher': 127},
+#                       'less': {'_count': 366, 'earlier': 121, 'before': 116},
+#                       'max': {'_count': 111, 'highest': 53},
+#                       'min': {'_count': 43, 'earliest': 17},
+#                       'most_eq': {'_count': 80, 'most': 45, 'majority': 27},
+#                       'most_greater': {'_count': 151, 'most': 81, 'majority': 65},
+#                       'most_greater_eq': {'_count': 55, 'least': 41, 'most': 30, 'majority': 24},
+#                       'most_less': {'_count': 105, 'most': 69, 'majority': 34, 'under': 29, 'before': 19},
+#                       'most_less_eq': {'_count': 7, 'majority': 4, 'most': 3},
+#                       'most_not_eq': {'_count': 2, 'most': 2},
+#                       'most_str_eq': {'_count': 750, 'most': 377, 'majority': 345},
+#                       'most_str_not_eq': {'_count': 8, 'most': 5, 'majority': 3},
+#                       'nth_argmax': {'_count': 553, 'highest': 359, '2nd': 165,
+#                                      'second': 152, 'most': 59, 'third': 53,
+#                                      'among': 50, 'last': 39, '3rd': 30, 'all': 29},
+#                       'nth_argmin': {'_count': 365, 'second': 110, 'earliest': 102,
+#                                      '2nd': 55, 'lowest': 44, 'third': 37},
+#                       'nth_max': {'_count': 29, 'highest': 10, 'second': 8, 'third': 5, 'largest': 5, 'newest': 2},
+#                       'nth_min': {'_count': 69, 'second': 10, '1st': 9, '3rd': 5, 'third': 4, 'fourth': 4, '2nd': 4},
+#                       'only': {'_count': 1277},
+#                       'sum': {'_count': 335, 'total': 284, 'combined': 54}
+#                       }
 
 memory_arg_funcs = ('filter_str_eq', 'filter_str_not_eq', 'filter_eq', 'filter_not_eq', 'filter_less',
                     'filter_greater', 'filter_greater_eq', 'filter_less_eq', 'greater_str_inv', 'less_str_inv')
@@ -630,11 +632,11 @@ pat_add = r"((?<==\s)\d+)"
 # dates
 pat_year = r"\b(\d\d\d\d)\b"
 pat_day = r"\b(\d\d?)\b"
-pat_month = r"\b((?:jan(?:uary)?|feb(?:ruary)?|mar(?:rch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|sept?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?))\b"
+pat_month = r"\b((?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|sept|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?))\b"
 
 
 class ExeError(Exception):
-    def __init__(self, message):
+    def __init__(self, message=''):
         super(ExeError, self).__init__()
         self.message = message
 
@@ -862,12 +864,16 @@ def fuzzy_comp_inv_date(t, col, type):
     day_list = t[col].str.extract(pat_day, expand=False)
     month_list = t[col].str.extract(pat_month, expand=False)
     month_num_list = month_list.map(month_map)
+    no_year, no_month, no_day = False, False, False
     if year_list.isnull().any():
         year_list.loc[:] = np.nan
+        no_year = True
     if month_num_list.isnull().any():
         month_num_list.loc[:] = np.nan
+        no_month = True
     if day_list.isnull().any():
         day_list.loc[:] = np.nan
+        no_day = True
     year_ctr = Counter(year_list) if not year_list.isnull().any() else {}
     month_ctr = Counter(month_num_list) if not month_num_list.isnull().any() else {}
     day_ctr = Counter(day_list) if not day_list.isnull().any() else {}
@@ -891,25 +897,25 @@ def fuzzy_comp_inv_date(t, col, type):
             raise ExeError(f"Can't apply most on table of length {len(t)}")
         idx = 0 if type[0] == 'a' else len(t) - len(t) // 3
         ret_val = date_values[idx] if 'gte' in type else date_values[idx] - pd.Timedelta(days=1)
-        date_ret_val = '' if not len(day_ctr) == 1 else 'd'
-        date_ret_val += '' if not len(month_ctr) == 1 else 'm'
-        date_ret_val += '' if not len(year_ctr) == 1 else 'y'
+        date_ret_val = '' if no_day else 'd'
+        date_ret_val += '' if no_month else 'm'
+        date_ret_val += '' if no_year else 'y'
         date_ret_val += ': '
-        date_ret_val += '' if not len(day_ctr) == 1 else f'{ret_val.day} '
-        date_ret_val += '' if not len(month_ctr) == 1 else f'{imonth_map[ret_val.month]} '
-        date_ret_val += '' if not len(year_ctr) == 1 else f'{ret_val.year} '
+        date_ret_val += '' if no_day else f'{ret_val.day} '
+        date_ret_val += '' if no_month else f'{imonth_map[ret_val.month]} '
+        date_ret_val += '' if no_year else f'{ret_val.year} '
         date_ret_val = date_ret_val[:-1]
         return date_ret_val
     if 'lt' in type:
         idx = len(t) - 1 if type[0] == 'a' else len(t) // 3 - 1
         ret_val = date_values[idx] if 'lte' in type else date_values[idx] + pd.Timedelta(days=1)
-        date_ret_val = '' if not len(day_ctr) == 1 else 'd'
-        date_ret_val += '' if not len(month_ctr) == 1 else 'm'
-        date_ret_val += '' if not len(year_ctr) == 1 else 'y'
+        date_ret_val = '' if no_day else 'd'
+        date_ret_val += '' if no_month else 'm'
+        date_ret_val += '' if no_year else 'y'
         date_ret_val += ': '
-        date_ret_val += '' if not len(day_ctr) == 1 else f'{ret_val.day} '
-        date_ret_val += '' if not len(month_ctr) == 1 else f'{imonth_map[ret_val.month]} '
-        date_ret_val += '' if not len(year_ctr) == 1 else f'{ret_val.year} '
+        date_ret_val += '' if no_day else f'{ret_val.day} '
+        date_ret_val += '' if no_month else f'{imonth_map[ret_val.month]} '
+        date_ret_val += '' if no_year else f'{ret_val.year} '
         date_ret_val = date_ret_val[:-1]
         return date_ret_val
     if 'eq' in type:
@@ -933,6 +939,12 @@ def fuzzy_comp_inv_date(t, col, type):
             dt_opt = []
             for fmt in powerset('dmy'):
                 if len(fmt) == 0:
+                    continue
+                if 'd' in fmt and no_day:
+                    continue
+                if 'm' in fmt and no_month:
+                    continue
+                if 'y' in fmt and no_year:
                     continue
                 tot_rows = t.shape[0]
                 dl = day_list if 'd' in fmt else [1] * tot_rows
@@ -962,19 +974,21 @@ def fuzzy_comp_inv_date(t, col, type):
 
 ### for comparison
 # Type: obj
-def safe_obj_compare(obj1, obj2, type):
+def safe_obj_compare(obj1, obj2, type, only):
     try:
-        return obj_compare(obj1, obj2, type=type)
+        return obj_compare(obj1, obj2, type=type, only=only)
     except ExeError:
         return False
 
 
-def obj_compare(num1, num2, round=False, type="eq"):
+def obj_compare(num1, num2, round=False, type="eq", only=''):
     tolerance = 0.15 if round else 1e-9
     # both numeric
     if isinstance(num1, (list, tuple)) or isinstance(num2, (list, tuple)):
         raise ValueError(f"Bad input to obj_compare num1: {num1}, num2: {num2}")
     try:
+        if only == 'date':
+            raise ValueError()
         num_1 = float(num1)
         num_2 = float(num2)
 
@@ -1008,6 +1022,8 @@ def obj_compare(num1, num2, round=False, type="eq"):
         # num1
         if len(re.findall(pat_month, num1)) > 0:
             try:
+                if only == 'num':
+                    raise ValueError()
                 comp_y, comp_m, comp_d = False, False, False
                 year_val1 = re.findall(pat_year, num1)
                 if len(year_val1) == 0:
@@ -1092,6 +1108,8 @@ def obj_compare(num1, num2, round=False, type="eq"):
                 pass
 
         # mixed string and numerical
+        if only == 'date':
+            raise ExeError()
         val_pat1 = re.findall(pat_num, num1)
         val_pat2 = re.findall(pat_num, num2)
         if len(val_pat1) == 0 or len(val_pat2) == 0:
@@ -1283,12 +1301,25 @@ def str_eq_inv(t, col, type):
     """
     type: all, most
     """
-    ctr = Counter(t[col])
     if type == 'all':
-        if len(ctr) != 1:
+        def get_lcs(a, b):
+            from difflib import SequenceMatcher
+            match = SequenceMatcher(None, a, b).find_longest_match(0, len(a), 0, len(b))
+            return a[match.a:match.a + match.size].strip()
+
+        # if len(ctr) != 1:
+        #     raise ExeError(f"Can't apply str aeq on col {col}")
+        # return list(ctr.keys())[0]
+        lcs = t[col].iloc[0]
+        for s in t[col].tolist():
+            lcs = get_lcs(lcs, s)
+            if len(lcs) == 0:
+                break
+        if len(lcs) == 0:
             raise ExeError(f"Can't apply str aeq on col {col}")
-        return list(ctr.keys())[0]
+        return lcs
     if type == 'most':
+        ctr = Counter(t[col])
         vals = []
         for k, v in ctr.items():
             if v >= len(t) // 3:
@@ -1342,35 +1373,37 @@ def check_if_accept(func, returned, actual):
     k = func
     if k in ['avg', 'sum']:
         return obj_compare(actual, returned, True)
-    if v['output'] in ['num', 'obj', 'str']:
-        return obj_compare(actual, returned)
-    elif v['output'] == 'pair_obj':
+    elif v['argument'] == ['row', 'header']:
         if 'greater' in k:
             comp_type = "less_eq"
         elif 'less' in k:
             comp_type = "greater_eq"
-        elif k == 'all_eq_inv':
+        elif k in ['all_eq_inv_num', 'all_eq_inv_date']:
             comp_type = "eq"
         else:
             return False
+        if v['output'] == 'date':
+            if len(re.findall(pat_month, actual)) > 0:
+                if returned is None:
+                    return False
+                return safe_obj_compare(actual, returned, type=comp_type, only='date')
+        elif v['output'] == 'num':
+            if len(re.findall(pat_num, actual)) > 0:
+                if returned is None:
+                    return False
+                return safe_obj_compare(actual, returned, type=comp_type, only='num')
+    elif v['argument'] == ['row', 'header'] and v['output'] == 'list_num':
+        if len(re.findall(pat_num, actual)) > 0:
+            if returned is None:
+                return False
+            return any(safe_obj_compare(actual, ret_val, 'eq', 'num') for ret_val in returned)
+    elif v['argument'] == ['row', 'header'] and v['output'] == 'list_date':
         if len(re.findall(pat_month, actual)) > 0:
-            if returned[1] is None:
+            if returned is None:
                 return False
-            return safe_obj_compare(actual, returned[1], type=comp_type)
-        elif len(re.findall(pat_num, actual)) > 0:
-            if returned[0] is None:
-                return False
-            return safe_obj_compare(actual, returned[0], type=comp_type)
-    elif v['output'] == 'pair_list_obj':
-        ix = None
-        if len(re.findall(pat_month, actual)) > 0:
-            ix = 1
-        elif len(re.findall(pat_num, actual)) > 0:
-            ix = 0
-        if ix is not None:
-            if returned[ix] is None:
-                return False
-            return any(obj_compare(actual, ret_val) for ret_val in returned[ix])
+            return any(safe_obj_compare(actual, ret_val, 'eq', 'date') for ret_val in returned)
+    elif v['output'] in ['num', 'obj', 'str']:
+        return obj_compare(actual, returned)
     elif v['output'] == 'list_str':
         return any(obj_compare(actual, ret_val) for ret_val in returned)
 

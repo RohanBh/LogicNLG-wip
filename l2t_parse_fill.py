@@ -521,49 +521,73 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                                             conditional_add(tmp, hist[step + 1])
                                         else:
                                             continue
-                                    elif v['output'] == 'pair_obj':
+                                    elif v['output'] == 'num':
                                         if tmp.done():
                                             if 'greater' in k:
                                                 comp_type = "less_eq"
                                             elif 'less' in k:
                                                 comp_type = "greater_eq"
-                                            elif k == 'all_eq_inv':
+                                            elif k == 'all_eq_inv_num':
+                                                comp_type = "eq"
+                                            else:
+                                                raise ValueError(f"error, output of scope {k}")
+                                            if len(re.findall(pat_num, masked_val[1])) > 0:
+                                                if returned is None:
+                                                    continue
+                                                tmp.append_result(
+                                                    command,
+                                                    f'{returned}/' +
+                                                    str(safe_obj_compare(masked_val[1], returned,
+                                                                         type=comp_type, only='num')))
+                                                finished.append((tmp, returned))
+                                            else:
+                                                continue
+                                    elif v['output'] == 'date':
+                                        if tmp.done():
+                                            if 'greater' in k:
+                                                comp_type = "less_eq"
+                                            elif 'less' in k:
+                                                comp_type = "greater_eq"
+                                            elif k == 'all_eq_inv_date':
                                                 comp_type = "eq"
                                             else:
                                                 raise ValueError(f"error, output of scope {k}")
                                             if len(re.findall(pat_month, masked_val[1])) > 0:
-                                                if returned[1] is None:
+                                                if returned is None:
                                                     continue
                                                 tmp.append_result(
                                                     command,
-                                                    f'{returned[1]}/' +
-                                                    str(safe_obj_compare(masked_val[1], returned[1], type=comp_type)))
-                                                finished.append((tmp, returned[1]))
-                                            elif len(re.findall(pat_num, masked_val[1])) > 0:
-                                                if returned[0] is None:
-                                                    continue
-                                                tmp.append_result(
-                                                    command,
-                                                    f'{returned[0]}/' +
-                                                    str(safe_obj_compare(masked_val[1], returned[0], type=comp_type)))
-                                                finished.append((tmp, returned[0]))
+                                                    f'{returned}/' +
+                                                    str(safe_obj_compare(masked_val[1], returned,
+                                                                         type=comp_type, only='date')))
+                                                finished.append((tmp, returned))
                                             else:
                                                 continue
-                                    elif v['output'] == 'pair_list_obj':
+                                    elif v['output'] == 'list_num':
                                         if tmp.done():
-                                            ix = None
-                                            if len(re.findall(pat_month, masked_val[1])) > 0:
-                                                ix = 1
-                                            elif len(re.findall(pat_num, masked_val[1])) > 0:
-                                                ix = 0
-                                            if ix is not None:
-                                                if returned[ix] is None:
+                                            if len(re.findall(pat_num, masked_val[1])) > 0:
+                                                if returned is None:
                                                     continue
-                                                for ret_val in returned[ix]:
+                                                for ret_val in returned:
                                                     tmp_new = copy.deepcopy(tmp)
                                                     tmp_new.append_result(
                                                         command,
-                                                        f'{ret_val}/' + str(obj_compare(masked_val[1], ret_val)))
+                                                        f'{ret_val}/' + str(safe_obj_compare(
+                                                            masked_val[1], ret_val, 'eq', only='num')))
+                                                    finished.append((tmp_new, ret_val))
+                                            else:
+                                                continue
+                                    elif v['output'] == 'list_date':
+                                        if tmp.done():
+                                            if len(re.findall(pat_month, masked_val[1])) > 0:
+                                                if returned is None:
+                                                    continue
+                                                for ret_val in returned:
+                                                    tmp_new = copy.deepcopy(tmp)
+                                                    tmp_new.append_result(
+                                                        command,
+                                                        f'{ret_val}/' + str(safe_obj_compare(
+                                                            masked_val[1], ret_val, 'eq', only='date')))
                                                     finished.append((tmp_new, ret_val))
                                             else:
                                                 continue
@@ -794,7 +818,10 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
                 else:
                     continue
 
-        if len(finished) > 100 or time.time() - start_time > 30:
+            if len(hist[step+1]) > 15000:
+                break
+        if len(finished) > 150 or time.time() - start_time > 60:
+            print()
             break
 
     return (name, orig_sent, sent, [_[0].cur_str for _ in finished])
@@ -1959,6 +1986,7 @@ class Parser(object):
         if debug:
             print(f"\nInput to dynmiac programmer:\nog_sent: {og_sent}"
                   f"\nlinked: {linked_sent}\nmasked: {masked_sent}\nmapping: {mapping}"
+                  f"\npos_tags: {pos_tags}"
                   f"\nmem_str, mem_num, mem_date: {mem_str, mem_num, mem_date}"
                   f"\nhead_str, head_num, head_date: {head_str, head_num, head_date}"
                   f"\nmasked_val: {masked_val}\n")
