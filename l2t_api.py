@@ -5,6 +5,8 @@ from collections import Counter
 import numpy as np
 import pandas as pd
 
+from utils import powerset
+
 type2funcs = {'aggregation': {'avg', 'sum'},
               'comparative': {'diff', 'greater', 'less'},
               'count': {'count'},
@@ -454,91 +456,162 @@ APIs["all_str_eq_inv"] = {"argument": ['row', 'header_str'], "output": "str",
 # Write the most_greater_inv func. Takes 'row', 'header' as input, creates a df of datetime and numbers using
 # regex pats and returns the largest element x such that len(df[df > x]) >= len(t) // 3. This return value signifies a
 # range of values from (-inf, x].
-APIs["most_greater_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
-                            "function": lambda t, col: fuzzy_comp_inv(t, col, "mgt"),
-                            "tostr": lambda t, col: "most_greater_inv {{ {} ; {} }}".format(t, col),
-                            "tosstr": lambda t, col: "most_greater_inv {{ {} ; {} }}".format(t, col),
-                            "append": None,
-                            'model_args': ['row', 'header']}
+APIs["most_greater_inv_num"] = {"argument": ['row', 'header'], "output": "num",
+                                "function": lambda t, col: fuzzy_comp_inv_num(t, col, "mgt"),
+                                "tostr": lambda t, col: "most_greater_inv_num {{ {} ; {} }}".format(t, col),
+                                "tosstr": lambda t, col: "most_greater_inv_num {{ {} ; {} }}".format(t, col),
+                                "append": None,
+                                'model_args': ['row', 'header']}
 
-APIs["most_greater_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
-                               "function": lambda t, col: fuzzy_comp_inv(t, col, "mgte"),
-                               "tostr": lambda t, col: "most_greater_eq_inv {{ {} ; {} }}".format(t, col),
-                               "tosstr": lambda t, col: "most_greater_eq_inv {{ {} ; {} }}".format(t, col),
-                               "append": None,
-                               'model_args': ['row', 'header']}
+APIs["most_greater_inv_date"] = {"argument": ['row', 'header'], "output": "date",
+                                 "function": lambda t, col: fuzzy_comp_inv_date(t, col, "mgt"),
+                                 "tostr": lambda t, col: "most_greater_inv_date {{ {} ; {} }}".format(t, col),
+                                 "tosstr": lambda t, col: "most_greater_inv_date {{ {} ; {} }}".format(t, col),
+                                 "append": None,
+                                 'model_args': ['row', 'header']}
+
+APIs["most_greater_eq_inv_num"] = {"argument": ['row', 'header'], "output": "num",
+                                   "function": lambda t, col: fuzzy_comp_inv_num(t, col, "mgte"),
+                                   "tostr": lambda t, col: "most_greater_eq_inv_num {{ {} ; {} }}".format(t, col),
+                                   "tosstr": lambda t, col: "most_greater_eq_inv_num {{ {} ; {} }}".format(t, col),
+                                   "append": None,
+                                   'model_args': ['row', 'header']}
+
+APIs["most_greater_eq_inv_date"] = {"argument": ['row', 'header'], "output": "date",
+                                    "function": lambda t, col: fuzzy_comp_inv_date(t, col, "mgte"),
+                                    "tostr": lambda t, col: "most_greater_eq_inv_date {{ {} ; {} }}".format(t, col),
+                                    "tosstr": lambda t, col: "most_greater_eq_inv_date {{ {} ; {} }}".format(t, col),
+                                    "append": None,
+                                    'model_args': ['row', 'header']}
 
 # Write the most_less_inv func. Takes 'row', 'header' as input, creates a df of datetime and numbers using
 # regex pats and returns the smallest element x such that len(df[df < x]) >= len(t) // 3. This return value signifies a
 # range of values from [x, inf).
-APIs["most_less_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
-                         "function": lambda t, col: fuzzy_comp_inv(t, col, "mlt"),
-                         "tostr": lambda t, col: "most_less_inv {{ {} ; {} }}".format(t, col),
-                         "tosstr": lambda t, col: "most_less_inv {{ {} ; {} }}".format(t, col),
-                         "append": None,
-                         'model_args': ['row', 'header']}
+APIs["most_less_inv_num"] = {"argument": ['row', 'header'], "output": "num",
+                             "function": lambda t, col: fuzzy_comp_inv_num(t, col, "mlt"),
+                             "tostr": lambda t, col: "most_less_inv_num {{ {} ; {} }}".format(t, col),
+                             "tosstr": lambda t, col: "most_less_inv_num {{ {} ; {} }}".format(t, col),
+                             "append": None,
+                             'model_args': ['row', 'header']}
 
-APIs["most_less_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
-                            "function": lambda t, col: fuzzy_comp_inv(t, col, "mlte"),
-                            "tostr": lambda t, col: "most_less_eq_inv {{ {} ; {} }}".format(t, col),
-                            "tosstr": lambda t, col: "most_less_eq_inv {{ {} ; {} }}".format(t, col),
-                            "append": None,
-                            'model_args': ['row', 'header']}
-
-APIs["all_greater_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
-                           "function": lambda t, col: fuzzy_comp_inv(t, col, "agt"),
-                           "tostr": lambda t, col: "all_greater_inv {{ {} ; {} }}".format(t, col),
-                           "tosstr": lambda t, col: "all_greater_inv {{ {} ; {} }}".format(t, col),
-                           "append": None,
-                           'model_args': ['row', 'header']}
-
-APIs["all_greater_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
-                              "function": lambda t, col: fuzzy_comp_inv(t, col, "agte"),
-                              "tostr": lambda t, col: "all_greater_eq_inv {{ {} ; {} }}".format(t, col),
-                              "tosstr": lambda t, col: "all_greater_eq_inv {{ {} ; {} }}".format(t, col),
+APIs["most_less_inv_date"] = {"argument": ['row', 'header'], "output": "date",
+                              "function": lambda t, col: fuzzy_comp_inv_date(t, col, "mlt"),
+                              "tostr": lambda t, col: "most_less_inv_date {{ {} ; {} }}".format(t, col),
+                              "tosstr": lambda t, col: "most_less_inv_date {{ {} ; {} }}".format(t, col),
                               "append": None,
                               'model_args': ['row', 'header']}
 
-APIs["all_less_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
-                        "function": lambda t, col: fuzzy_comp_inv(t, col, "alt"),
-                        "tostr": lambda t, col: "all_less_inv {{ {} ; {} }}".format(t, col),
-                        "tosstr": lambda t, col: "all_less_inv {{ {} ; {} }}".format(t, col),
-                        "append": None,
-                        'model_args': ['row', 'header']}
+APIs["most_less_eq_inv_num"] = {"argument": ['row', 'header'], "output": "num",
+                                "function": lambda t, col: fuzzy_comp_inv_num(t, col, "mlte"),
+                                "tostr": lambda t, col: "most_less_eq_inv_num {{ {} ; {} }}".format(t, col),
+                                "tosstr": lambda t, col: "most_less_eq_inv_num {{ {} ; {} }}".format(t, col),
+                                "append": None,
+                                'model_args': ['row', 'header']}
 
-APIs["all_less_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
-                           "function": lambda t, col: fuzzy_comp_inv(t, col, "alte"),
-                           "tostr": lambda t, col: "all_less_eq_inv {{ {} ; {} }}".format(t, col),
-                           "tosstr": lambda t, col: "all_less_eq_inv {{ {} ; {} }}".format(t, col),
-                           "append": None,
-                           'model_args': ['row', 'header']}
+APIs["most_less_eq_inv_date"] = {"argument": ['row', 'header'], "output": "date",
+                                 "function": lambda t, col: fuzzy_comp_inv_date(t, col, "mlte"),
+                                 "tostr": lambda t, col: "most_less_eq_inv_date {{ {} ; {} }}".format(t, col),
+                                 "tosstr": lambda t, col: "most_less_eq_inv_date {{ {} ; {} }}".format(t, col),
+                                 "append": None,
+                                 'model_args': ['row', 'header']}
+
+APIs["all_greater_inv_num"] = {"argument": ['row', 'header'], "output": "num",
+                               "function": lambda t, col: fuzzy_comp_inv_num(t, col, "agt"),
+                               "tostr": lambda t, col: "all_greater_inv_num {{ {} ; {} }}".format(t, col),
+                               "tosstr": lambda t, col: "all_greater_inv_num {{ {} ; {} }}".format(t, col),
+                               "append": None,
+                               'model_args': ['row', 'header']}
+
+APIs["all_greater_inv_date"] = {"argument": ['row', 'header'], "output": "date",
+                                "function": lambda t, col: fuzzy_comp_inv_date(t, col, "agt"),
+                                "tostr": lambda t, col: "all_greater_inv_date {{ {} ; {} }}".format(t, col),
+                                "tosstr": lambda t, col: "all_greater_inv_date {{ {} ; {} }}".format(t, col),
+                                "append": None,
+                                'model_args': ['row', 'header']}
+
+APIs["all_greater_eq_inv_num"] = {"argument": ['row', 'header'], "output": "num",
+                                  "function": lambda t, col: fuzzy_comp_inv_num(t, col, "agte"),
+                                  "tostr": lambda t, col: "all_greater_eq_inv_num {{ {} ; {} }}".format(t, col),
+                                  "tosstr": lambda t, col: "all_greater_eq_inv_num {{ {} ; {} }}".format(t, col),
+                                  "append": None,
+                                  'model_args': ['row', 'header']}
+
+APIs["all_greater_eq_inv_date"] = {"argument": ['row', 'header'], "output": "date",
+                                   "function": lambda t, col: fuzzy_comp_inv_date(t, col, "agte"),
+                                   "tostr": lambda t, col: "all_greater_eq_inv_date {{ {} ; {} }}".format(t, col),
+                                   "tosstr": lambda t, col: "all_greater_eq_inv_date {{ {} ; {} }}".format(t, col),
+                                   "append": None,
+                                   'model_args': ['row', 'header']}
+
+APIs["all_less_inv_num"] = {"argument": ['row', 'header'], "output": "num",
+                            "function": lambda t, col: fuzzy_comp_inv_num(t, col, "alt"),
+                            "tostr": lambda t, col: "all_less_inv_num {{ {} ; {} }}".format(t, col),
+                            "tosstr": lambda t, col: "all_less_inv_num {{ {} ; {} }}".format(t, col),
+                            "append": None,
+                            'model_args': ['row', 'header']}
+
+APIs["all_less_inv_date"] = {"argument": ['row', 'header'], "output": "date",
+                             "function": lambda t, col: fuzzy_comp_inv_date(t, col, "alt"),
+                             "tostr": lambda t, col: "all_less_inv_date {{ {} ; {} }}".format(t, col),
+                             "tosstr": lambda t, col: "all_less_inv_date {{ {} ; {} }}".format(t, col),
+                             "append": None,
+                             'model_args': ['row', 'header']}
+
+APIs["all_less_eq_inv_num"] = {"argument": ['row', 'header'], "output": "num",
+                               "function": lambda t, col: fuzzy_comp_inv_num(t, col, "alte"),
+                               "tostr": lambda t, col: "all_less_eq_inv_num {{ {} ; {} }}".format(t, col),
+                               "tosstr": lambda t, col: "all_less_eq_inv_num {{ {} ; {} }}".format(t, col),
+                               "append": None,
+                               'model_args': ['row', 'header']}
+
+APIs["all_less_eq_inv_date"] = {"argument": ['row', 'header'], "output": "date",
+                                "function": lambda t, col: fuzzy_comp_inv_date(t, col, "alte"),
+                                "tostr": lambda t, col: "all_less_eq_inv_date {{ {} ; {} }}".format(t, col),
+                                "tosstr": lambda t, col: "all_less_eq_inv_date {{ {} ; {} }}".format(t, col),
+                                "append": None,
+                                'model_args': ['row', 'header']}
 
 # Write the most_eq_inv func. most_eq_inv takes as input a 'row', 'header' and creates a date df and a num df from
 # regex pats. From there, it creates a counter of values and returns all the keys as output that have counts/values
 # greater than eq to len(t) // 3
 # returns pair of list of obj
-APIs["most_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_list_obj",
-                       "function": lambda t, col: fuzzy_comp_inv(t, col, "meq"),
-                       "tostr": lambda t, col: "most_eq_inv {{ {} ; {} }}".format(t, col),
-                       "tosstr": lambda t, col: "most_eq_inv {{ {} ; {} }}".format(t, col),
-                       "append": None,
-                       'model_args': ['row', 'header']}
+APIs["most_eq_inv_num"] = {"argument": ['row', 'header'], "output": "list_num",
+                           "function": lambda t, col: fuzzy_comp_inv_num(t, col, "meq"),
+                           "tostr": lambda t, col: "most_eq_inv_num {{ {} ; {} }}".format(t, col),
+                           "tosstr": lambda t, col: "most_eq_inv_num {{ {} ; {} }}".format(t, col),
+                           "append": None,
+                           'model_args': ['row', 'header']}
+
+APIs["most_eq_inv_date"] = {"argument": ['row', 'header'], "output": "list_date",
+                            "function": lambda t, col: fuzzy_comp_inv_date(t, col, "meq"),
+                            "tostr": lambda t, col: "most_eq_inv_date {{ {} ; {} }}".format(t, col),
+                            "tosstr": lambda t, col: "most_eq_inv_date {{ {} ; {} }}".format(t, col),
+                            "append": None,
+                            'model_args': ['row', 'header']}
 
 # Write the all_eq_inv func. Takes 'row', 'header' as input and outputs the eq value(s)
 # on datetime df and the num df.
 # Precondition: All col values are equal.
-# TODO: Check if all months are equal or all days are equal or all years are equal
-APIs["all_eq_inv"] = {"argument": ['row', 'header'], "output": "pair_obj",
-                      "function": lambda t, col: fuzzy_comp_inv(t, col, "aeq"),
-                      "tostr": lambda t, col: "all_eq_inv {{ {} ; {} }}".format(t, col),
-                      "tosstr": lambda t, col: "all_eq_inv {{ {} ; {} }}".format(t, col),
-                      "append": None,
-                      'model_args': ['row', 'header']}
+APIs["all_eq_inv_num"] = {"argument": ['row', 'header'], "output": "num",
+                          "function": lambda t, col: fuzzy_comp_inv_num(t, col, "aeq"),
+                          "tostr": lambda t, col: "all_eq_inv_num {{ {} ; {} }}".format(t, col),
+                          "tosstr": lambda t, col: "all_eq_inv_num {{ {} ; {} }}".format(t, col),
+                          "append": None,
+                          'model_args': ['row', 'header']}
+
+APIs["all_eq_inv_date"] = {"argument": ['row', 'header'], "output": "date",
+                           "function": lambda t, col: fuzzy_comp_inv_date(t, col, "aeq"),
+                           "tostr": lambda t, col: "all_eq_inv_date {{ {} ; {} }}".format(t, col),
+                           "tosstr": lambda t, col: "all_eq_inv_date {{ {} ; {} }}".format(t, col),
+                           "append": None,
+                           'model_args': ['row', 'header']}
 
 month_map = {'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
              'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12,
-             'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6, 'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10,
-             'nov': 11, 'dec': 12}
+             'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6, 'jul': 7, 'aug': 8, 'sep': 9, 'sept': 9,
+             'oct': 10, 'nov': 11, 'dec': 12}
+imonth_map = {v: k for k, v in month_map.items()}
+imonth_map.update({str(k): v for k, v in imonth_map.items()})
 
 ### regex list
 
@@ -557,7 +630,7 @@ pat_add = r"((?<==\s)\d+)"
 # dates
 pat_year = r"\b(\d\d\d\d)\b"
 pat_day = r"\b(\d\d?)\b"
-pat_month = r"\b((?:jan(?:uary)?|feb(?:ruary)?|mar(?:rch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?))\b"
+pat_month = r"\b((?:jan(?:uary)?|feb(?:ruary)?|mar(?:rch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|sept?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?))\b"
 
 
 class ExeError(Exception):
@@ -714,7 +787,7 @@ def fuzzy_compare_filter(t, col, val, type):
     elif type == "not_eq":
         res = t[~np.isclose(nums, num)]
     else:
-        (f"Unsupported Type: {type}")
+        raise ValueError(f"Unsupported Type: {type}")
 
     res = res.reset_index(drop=True)
     return res
@@ -722,34 +795,15 @@ def fuzzy_compare_filter(t, col, val, type):
 
 # For compare inverses
 # Type: col - obj_col
-def fuzzy_comp_inv(t, col, type):
+def fuzzy_comp_inv_num(t, col, type):
     """
-    Fuzzy compare for objects
+    Fuzzy compare for num
 
     type: mgt, mlt, mgte, mlte, agt, alt, agte, alte, meq, aeq
     """
     t[col] = t[col].astype('str')
-
-    # dates
-    year_list = t[col].str.extract(pat_year, expand=False)
-    day_list = t[col].str.extract(pat_day, expand=False)
-    month_list = t[col].str.extract(pat_month, expand=False)
-    month_num_list = month_list.map(month_map)
-
-    # pandas at most 2262
-    year_list = year_list.fillna("2260").astype("int")
-    year_list[year_list >= 2262] = 2261
-    year_list[year_list <= 1677] = 1678
-    day_list = day_list.fillna("1").astype("int")
-    day_list[day_list > 30] = 30
-    day_list[day_list <= 0] = 1
-    month_num_list = month_num_list.fillna("1").astype("int")
-
-    date_frame = pd.to_datetime(pd.DataFrame({'year': year_list, 'month': month_num_list, 'day': day_list}),
-                                infer_datetime_format=True)
-    date_values = sorted(date_frame)
-
     pats = t[col].str.extract(pat_add, expand=False)
+
     if pats.isnull().all():
         pats = t[col].str.extract(pat_num, expand=False)
 
@@ -768,33 +822,141 @@ def fuzzy_comp_inv(t, col, type):
             raise ExeError(f"Can't apply most on table of length {len(t)}")
         idx = 0 if type[0] == 'a' else len(t) - len(t) // 3
         if 'gte' in type:
-            return nums[idx], date_values[idx]
+            return nums[idx]
         else:
-            return nums[idx] - 0.0001, date_values[idx] - pd.Timedelta(days=1)
+            return nums[idx] - 0.0001
     if 'lt' in type:
         idx = len(t) - 1 if type[0] == 'a' else len(t) // 3 - 1
         if 'lte' in type:
-            return nums[idx], date_values[idx]
+            return nums[idx]
         else:
-            return nums[idx] + 0.0001, date_values[idx] + pd.Timedelta(days=1)
+            return nums[idx] + 0.0001
     if 'eq' in type:
-        c_num, c_dt = Counter(nums), Counter(date_values)
+        c_num = Counter(nums)
         if type == 'aeq':
-            if not (len(c_num) == 1 or len(c_dt) == 1):
+            if not (len(c_num) == 1):
                 raise ExeError(f"Unable to apply obj aeq func on col {col}")
-            return (list(c_num.keys())[0] if len(c_num) == 1 else None,
-                    list(c_dt.keys())[0] if len(c_dt) == 1 else None)
+
+            return list(c_num.keys())[0]
         if type == 'meq':
             num_opt, dt_opt = [], []
             for k, v in c_num.items():
                 if v >= len(t) // 3:
                     num_opt.append(k)
-            for k, v in c_dt.items():
-                if v >= len(t) // 3:
-                    dt_opt.append(k)
-            if not (len(num_opt) > 0 or len(dt_opt) > 0):
+            if len(num_opt) == 0:
                 raise ExeError(f"Unable to apply obj meq func on col {col}")
-            return num_opt if len(num_opt) > 0 else None, dt_opt if len(dt_opt) > 0 else None
+            return num_opt
+    raise ValueError(f"Unsupported type: {type}")
+
+
+def fuzzy_comp_inv_date(t, col, type):
+    """
+    Fuzzy compare for date
+
+    type: mgt, mlt, mgte, mlte, agt, alt, agte, alte, meq, aeq
+    """
+    t[col] = t[col].astype('str')
+
+    # dates
+    year_list = t[col].str.extract(pat_year, expand=False)
+    day_list = t[col].str.extract(pat_day, expand=False)
+    month_list = t[col].str.extract(pat_month, expand=False)
+    month_num_list = month_list.map(month_map)
+    if year_list.isnull().any():
+        year_list.loc[:] = np.nan
+    if month_num_list.isnull().any():
+        month_num_list.loc[:] = np.nan
+    if day_list.isnull().any():
+        day_list.loc[:] = np.nan
+    year_ctr = Counter(year_list) if not year_list.isnull().any() else {}
+    month_ctr = Counter(month_num_list) if not month_num_list.isnull().any() else {}
+    day_ctr = Counter(day_list) if not day_list.isnull().any() else {}
+
+    # pandas at most 2262
+    year_list = year_list.fillna("2260").astype("int")
+    day_list = day_list.fillna("1").astype("int")
+    month_num_list = month_num_list.fillna("1").astype("int")
+
+    try:
+        date_frame = pd.to_datetime(
+            pd.DataFrame({'year': year_list, 'month': month_num_list, 'day': day_list}),
+            infer_datetime_format=True)
+    except ValueError as err:
+        raise ExeError(f"Invalid date values found: {err}")
+
+    date_values = sorted(date_frame)
+
+    if 'gt' in type:
+        if len(t) < 3 and type[0] == 'm':
+            raise ExeError(f"Can't apply most on table of length {len(t)}")
+        idx = 0 if type[0] == 'a' else len(t) - len(t) // 3
+        ret_val = date_values[idx] if 'gte' in type else date_values[idx] - pd.Timedelta(days=1)
+        date_ret_val = '' if not len(day_ctr) == 1 else 'd'
+        date_ret_val += '' if not len(month_ctr) == 1 else 'm'
+        date_ret_val += '' if not len(year_ctr) == 1 else 'y'
+        date_ret_val += ': '
+        date_ret_val += '' if not len(day_ctr) == 1 else f'{ret_val.day} '
+        date_ret_val += '' if not len(month_ctr) == 1 else f'{imonth_map[ret_val.month]} '
+        date_ret_val += '' if not len(year_ctr) == 1 else f'{ret_val.year} '
+        date_ret_val = date_ret_val[:-1]
+        return date_ret_val
+    if 'lt' in type:
+        idx = len(t) - 1 if type[0] == 'a' else len(t) // 3 - 1
+        ret_val = date_values[idx] if 'lte' in type else date_values[idx] + pd.Timedelta(days=1)
+        date_ret_val = '' if not len(day_ctr) == 1 else 'd'
+        date_ret_val += '' if not len(month_ctr) == 1 else 'm'
+        date_ret_val += '' if not len(year_ctr) == 1 else 'y'
+        date_ret_val += ': '
+        date_ret_val += '' if not len(day_ctr) == 1 else f'{ret_val.day} '
+        date_ret_val += '' if not len(month_ctr) == 1 else f'{imonth_map[ret_val.month]} '
+        date_ret_val += '' if not len(year_ctr) == 1 else f'{ret_val.year} '
+        date_ret_val = date_ret_val[:-1]
+        return date_ret_val
+    if 'eq' in type:
+        if type == 'aeq':
+            if not (len(year_ctr) == 1 or len(month_ctr) == 1 or len(day_ctr) == 1):
+                raise ExeError(f"Unable to apply obj aeq func on col {col}")
+
+            def get_val(ctr):
+                return list(ctr.keys())[0]
+
+            date_ret_val = '' if not len(day_ctr) == 1 else 'd'
+            date_ret_val += '' if not len(month_ctr) == 1 else 'm'
+            date_ret_val += '' if not len(year_ctr) == 1 else 'y'
+            date_ret_val += ': '
+            date_ret_val += '' if not len(day_ctr) == 1 else f'{get_val(day_ctr)} '
+            date_ret_val += '' if not len(month_ctr) == 1 else f'{imonth_map[get_val(month_ctr)]} '
+            date_ret_val += '' if not len(year_ctr) == 1 else f'{get_val(year_ctr)} '
+            date_ret_val = date_ret_val[:-1]
+            return date_ret_val
+        if type == 'meq':
+            dt_opt = []
+            for fmt in powerset('dmy'):
+                if len(fmt) == 0:
+                    continue
+                tot_rows = t.shape[0]
+                dl = day_list if 'd' in fmt else [1] * tot_rows
+                ml = month_num_list if 'm' in fmt else [1] * tot_rows
+                yl = year_list if 'y' in fmt else [2260] * tot_rows
+                _df = pd.to_datetime(
+                    pd.DataFrame({'year': yl, 'month': ml, 'day': dl}),
+                    infer_datetime_format=True)
+                _dv = sorted(_df)
+                c_dt = Counter(_dv)
+                for k, v in c_dt.items():
+                    if v >= len(t) // 3:
+                        val = '' if not 'd' in fmt else 'd'
+                        val += '' if not 'm' in fmt else 'm'
+                        val += '' if not 'y' in fmt else 'y'
+                        val += ': '
+                        val += '' if not 'd' in fmt else f'{k.day} '
+                        val += '' if not 'm' in fmt else f'{imonth_map[k.month]} '
+                        val += '' if not 'y' in fmt else f'{k.year} '
+                        val = val[:-1]
+                        dt_opt.append(val)
+            if len(dt_opt) == 0:
+                raise ExeError(f"Unable to apply obj meq func on col {col}")
+            return dt_opt
     raise ValueError(f"Unsupported type: {type}")
 
 
@@ -837,30 +999,39 @@ def obj_compare(num1, num2, round=False, type="eq"):
     except ValueError:
         # strings
         # mixed numbers and strings
+        # num1 is actual value
         num1 = str(num1)
+        # num2 is the returned value
         num2 = str(num2)
 
         # dates
         # num1
         if len(re.findall(pat_month, num1)) > 0:
             try:
+                comp_y, comp_m, comp_d = False, False, False
                 year_val1 = re.findall(pat_year, num1)
                 if len(year_val1) == 0:
                     year_val1 = int("2260")
                 else:
                     year_val1 = int(year_val1[0])
+                    comp_y = True
 
                 day_val1 = re.findall(pat_day, num1)
                 if len(day_val1) == 0:
                     day_val1 = int("1")
                 else:
                     day_val1 = int(day_val1[0])
+                    comp_d = True
 
                 month_val1 = re.findall(pat_month, num1)
                 if len(month_val1) == 0:
                     month_val1 = int("1")
                 else:
                     month_val1 = month_map[month_val1[0]]
+                    comp_m = True
+
+                if not (comp_d or comp_m or comp_y):
+                    raise ExeError(f"Actual val has no date parts: {num1}")
 
                 try:
                     date_val1 = pd.datetime(year_val1, month_val1, day_val1)
@@ -869,19 +1040,25 @@ def obj_compare(num1, num2, round=False, type="eq"):
 
                 # num2
                 year_val2 = re.findall(pat_year, num2)
-                if len(year_val2) == 0:
+                if len(year_val2) == 0 and comp_y:
+                    raise ExeError(f"Year val not present in returned: {num2}")
+                elif len(year_val2) == 0 or not comp_y:
                     year_val2 = int("2260")
                 else:
                     year_val2 = int(year_val2[0])
 
                 day_val2 = re.findall(pat_day, num2)
-                if len(day_val2) == 0:
+                if len(day_val2) == 0 and comp_d:
+                    raise ExeError(f"Day val not present in returned: {num2}")
+                elif len(day_val2) == 0 or not comp_d:
                     day_val2 = int("1")
                 else:
                     day_val2 = int(day_val2[0])
 
                 month_val2 = re.findall(pat_month, num2)
-                if len(month_val2) == 0:
+                if len(month_val2) == 0 and comp_m:
+                    raise ExeError(f"Month val not present in returned: {num2}")
+                elif len(month_val2) == 0 or not comp_m:
                     month_val2 = int("1")
                 else:
                     month_val2 = month_map[month_val2[0]]
