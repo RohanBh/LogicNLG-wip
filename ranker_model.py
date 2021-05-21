@@ -220,7 +220,7 @@ class RobertaRanker(nn.Module):
                 optimizer.step()
                 scheduler.step()
 
-                if idx % args.every == 0 and idx > 0:
+                if idx % args.every == 0:
                     tb_writer.add_scalar("Avg loss", avg_loss / args.every, global_step)
                     avg_loss = 0
 

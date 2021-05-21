@@ -1374,7 +1374,7 @@ def check_if_accept(func, returned, actual):
     k = func
     if k in ['avg', 'sum']:
         return obj_compare(actual, returned, True)
-    elif v['argument'] == ['row', 'header']:
+    elif '_inv' in k and v['argument'] == ['row', 'header'] and v['output'] in ['date', 'num']:
         if 'greater' in k:
             comp_type = "less_eq"
         elif 'less' in k:
@@ -1393,12 +1393,12 @@ def check_if_accept(func, returned, actual):
                 if returned is None:
                     return False
                 return safe_obj_compare(actual, returned, type=comp_type, only='num')
-    elif v['argument'] == ['row', 'header'] and v['output'] == 'list_num':
+    elif '_inv' in k and v['argument'] == ['row', 'header'] and v['output'] == 'list_num':
         if len(re.findall(pat_num, actual)) > 0:
             if returned is None:
                 return False
             return any(safe_obj_compare(actual, ret_val, 'eq', 'num') for ret_val in returned)
-    elif v['argument'] == ['row', 'header'] and v['output'] == 'list_date':
+    elif '_inv' in k and v['argument'] == ['row', 'header'] and v['output'] == 'list_date':
         if len(re.findall(pat_month, actual)) > 0:
             if returned is None:
                 return False
