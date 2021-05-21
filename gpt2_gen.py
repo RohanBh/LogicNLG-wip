@@ -497,6 +497,9 @@ class GPT2LM(nn.Module):
 
 def init_lm_arg_parser():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--do_train', action='store_true', default=False, help='Train the model')
+    parser.add_argument('--do_test', action='store_true', default=False, help='Test the model')
+
     parser.add_argument('--cuda', action='store_true', default=False, help='Use gpu')
     parser.add_argument('--model', default='gpt2', type=str,
                         help="The pretrained model to use as a language model")
@@ -521,9 +524,16 @@ def init_lm_arg_parser():
     return parser.parse_args()
 
 
-if __name__ == '__main__':
+def main():
     # create_train_data()
     # create_test_data()
     args = init_lm_arg_parser()
-    # GPT2LM.train_lm(args)
-    GPT2LM.test_program_lstm(args)
+    if args.do_train:
+        GPT2LM.train_lm(args)
+    elif args.do_test:
+        GPT2LM.test_program_lstm(args)
+    return
+
+
+if __name__ == '__main__':
+    main()

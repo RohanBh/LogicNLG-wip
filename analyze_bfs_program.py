@@ -133,7 +133,7 @@ def show_dist_2(fname):
 
 
 def main2():
-    fname = 'out_rb_079.json'
+    fname = 'out_rbn_129.json'
     print_check_proportion(fname)
     show_dist_2(fname)
     return

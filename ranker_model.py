@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from torch import nn
@@ -14,23 +15,26 @@ from tqdm.auto import tqdm
 from transformers import RobertaTokenizer, AdamW, get_linear_schedule_with_warmup, \
     RobertaForSequenceClassification, RobertaConfig
 
-from program_lstm import NEW_TOKENS
+from l2t_parse_fill import get_col_types, Parser
+from program_lstm import NEW_TOKENS, ProgramTree
+
+
+def _get_hash(table_name, sent):
+    formatted_sent = re.sub(r"[^\w\s]", '', sent)
+    formatted_sent = re.sub(r"\s+", '-', formatted_sent)
+    if len(formatted_sent) > 100:
+        formatted_sent = formatted_sent[-100:]
+    formatted_sent = table_name + '-' + formatted_sent
+    return formatted_sent
+
+
+def _get_prog_set(prog_list):
+    # ret_val = prog[prog.rfind('=') + 1:-5]
+    prog_list = [prog[:prog.rfind('=')] for prog in prog_list]
+    return set(prog_list)
 
 
 def create_ranker_train_data():
-    def get_hash(table_name, sent):
-        formatted_sent = re.sub(r"[^\w\s]", '', sent)
-        formatted_sent = re.sub(r"\s+", '-', formatted_sent)
-        if len(formatted_sent) > 100:
-            formatted_sent = formatted_sent[-100:]
-        formatted_sent = table_name + '-' + formatted_sent
-        return formatted_sent
-
-    def get_prog_set(prog_list):
-        # ret_val = prog[prog.rfind('=') + 1:-5]
-        prog_list = [prog[:prog.rfind('=')] for prog in prog_list]
-        return set(prog_list)
-
     with open('data/programs_filtered.json') as fp:
         pos_data = json.load(fp)
 
@@ -42,28 +46,53 @@ def create_ranker_train_data():
     pos_data_dict = {}
     for entry in tqdm(pos_data):
         table_name, sent = entry[:2]
-        entry_hash = get_hash(table_name, sent)
+        entry_hash = _get_hash(table_name, sent)
         pos_data_dict[entry_hash] = entry
 
     out_data = []
     for entry in tqdm(all_data):
         table_name, sent = entry[:2]
-        entry_hash = get_hash(table_name, sent)
+        entry_hash = _get_hash(table_name, sent)
         if entry_hash not in pos_data_dict:
             continue
         masked_linked_sent = pos_data_dict[entry_hash][3]
-        pos_progs = get_prog_set(pos_data_dict[entry_hash][-1])
+        pos_progs = _get_prog_set(pos_data_dict[entry_hash][-1])
         for prog in pos_progs:
             out_data.append((
                 table_name, sent, masked_linked_sent, prog, 1
             ))
-        all_progs = get_prog_set(entry[-1])
+        all_progs = _get_prog_set(entry[-1])
         for prog in all_progs - pos_progs:
             out_data.append((
                 table_name, sent, masked_linked_sent, prog, 0
             ))
 
     with open('data/train_ranker.json', 'w') as fp:
+        json.dump(out_data, fp, indent=2)
+    return
+
+
+def create_ranker_test_data():
+    parser = Parser("data/l2t/all_csv")
+    with open('data/all_test_programs.json') as fp:
+        all_data = json.load(fp)
+    all_data = [x for x in all_data if x is not None]
+    all_data = [x for x in all_data if len(x[-1]) > 0]
+
+    out_data = []
+    for entry in tqdm(all_data):
+        table_name, og_sent = entry[:2]
+        masked_sent, mapping = parser.fake_parse(table_name, og_sent)
+        table = pd.read_csv(f'data/l2t/all_csv/{entry[0]}', delimiter="#")
+        col2type = get_col_types(table)
+        cols = table.columns.tolist()
+        masked_linked_sent = ProgramTree.transform_linked_sent(masked_sent, mapping, cols, col2type, entry[3])
+        all_progs, masked_val = entry[-1], entry[3]
+        out_data.append((
+            table_name, og_sent, masked_linked_sent, masked_val, all_progs
+        ))
+
+    with open('data/test_ranker.json', 'w') as fp:
         json.dump(out_data, fp, indent=2)
     return
 
@@ -246,10 +275,61 @@ class RobertaRanker(nn.Module):
         tb_writer.close()
         return
 
+    @staticmethod
+    def apply_ranker(args):
+        print(args)
+        save_path = Path('roberta_ranker_outputs/')
+        save_path.mkdir(exist_ok=True)
+        device_str = 'cuda' if args.cuda else 'cpu'
+        device = torch.device(device_str)
+
+        model = RobertaRanker.load(args.model_path, args.cuda)
+        model.to(device)
+        model.eval()
+
+        with open('data/train_ranker.json') as fp:
+            data = json.load(fp)
+
+        test_data = {}
+        for entry in data:
+            table_name, og_sent = entry[:2]
+            entry_hash = _get_hash(table_name, og_sent)
+            test_data[entry_hash] = []
+            for prog in entry[-1]:
+                label = prog[prog.rfind('/') + 1:] == 'True'
+                prog = prog[:prog.rfind('=')]
+                ip_sent = RobertaRanker._get_input_sent(entry[2], prog, model)
+                test_data[entry_hash].append((ip_sent, label))
+            test_data[entry_hash].append((entry[0], entry[1], entry[2], entry[-1]))
+
+        out_data = []
+        with torch.no_grad():
+            for k in tqdm(test_data.keys(), total=len(test_data)):
+                table_name, og_sent, ml_sent, progs = test_data[k][-1]
+                sent_list, labels, = zip(*test_data[k][:-1])
+                labels = model.new_long_tensor(labels).unsqueeze(1)
+                padded_sequences = model.tokenizer(
+                    sent_list, padding=True, truncation=True, return_tensors="pt")
+                output = model(padded_sequences, labels)
+                logits = output.logits
+                scores = logits[:, 1]
+                max_score = torch.max(scores).item()
+                all_idx = [sidx for sidx, s_val in enumerate(scores.tolist()) if s_val == max_score]
+                selected_progs = [progs[i] for i in all_idx]
+                is_accept = any(['/True' in p for p in selected_progs])
+                out_data.append((
+                    table_name, og_sent, ml_sent, max_score, selected_progs, is_accept
+                ))
+        with open(save_path / f'out_{args.out_id}.json', 'w') as fp:
+            json.dump(out_data, fp, indent=2)
+        return
+
 
 def init_ranker_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--do_train', action='store_true', default=False, help='Weakly supervised training')
+    parser.add_argument('--do_test', action='store_true', default=False, help='Test')
+
     parser.add_argument('--cuda', action='store_true', default=False, help='Use gpu')
     parser.add_argument('--model', default='roberta-base', type=str,
                         help="The pretrained model to use as a language model")
@@ -269,11 +349,14 @@ def init_ranker_arg_parser():
 
 def main():
     # create_ranker_train_data()
+    # create_ranker_test_data()
     # downsample_neg()
     # get_stats()
     args = init_ranker_arg_parser()
     if args.do_train:
         RobertaRanker.train_ranker(args)
+    elif args.do_test:
+        RobertaRanker.apply_ranker(args)
     return
 
 
