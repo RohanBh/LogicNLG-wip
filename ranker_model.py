@@ -301,12 +301,12 @@ class RobertaRanker(nn.Module):
                 prog = prog[:prog.rfind('=')]
                 ip_sent = RobertaRanker._get_input_sent(entry[2], prog, model)
                 test_data[entry_hash].append((ip_sent, label))
-            test_data[entry_hash].append((entry[0], entry[1], entry[2], entry[-1]))
+            test_data[entry_hash].append((entry[0], entry[1], entry[2], entry[3], entry[-1]))
 
         out_data = []
         with torch.no_grad():
             for k in tqdm(test_data.keys(), total=len(test_data)):
-                table_name, og_sent, ml_sent, progs = test_data[k][-1]
+                table_name, og_sent, ml_sent, masked_val, progs = test_data[k][-1]
                 sent_list, labels, = zip(*test_data[k][:-1])
                 labels = model.new_long_tensor(labels).unsqueeze(1)
                 padded_sequences = model.tokenizer(
@@ -319,7 +319,7 @@ class RobertaRanker(nn.Module):
                 selected_progs = [progs[i] for i in all_idx]
                 is_accept = any(['/True' in p for p in selected_progs])
                 out_data.append((
-                    table_name, og_sent, ml_sent, max_score, selected_progs, is_accept
+                    table_name, og_sent, ml_sent, masked_val, max_score, selected_progs, is_accept
                 ))
         with open(save_path / f'out_{args.out_id}.json', 'w') as fp:
             json.dump(out_data, fp, indent=2)

@@ -1,6 +1,7 @@
 import json
 import pprint
 from collections import Counter
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 
@@ -83,8 +84,8 @@ def main():
 
 
 # Amalyze model outputs.
-def print_check_proportion(fname):
-    with open(f"plstm_outputs/{fname}", 'r') as f:
+def print_check_proportion(path):
+    with open(path, 'r') as f:
         data = json.load(f)
     data = [(x[-1], x[-2] != None) for x in data]
     ctr = Counter(data)
@@ -101,8 +102,8 @@ def print_check_proportion(fname):
     return
 
 
-def show_dist_2(fname):
-    with open(f"plstm_outputs/{fname}", 'r') as f:
+def show_dist_2(path):
+    with open(path, 'r') as f:
         data = json.load(f)
     counter = {'none': 0}
     tot_prog_dict = {'none': 0}
@@ -132,10 +133,49 @@ def show_dist_2(fname):
     return
 
 
+# Use this with Ranker output
+def show_dist_3(path):
+    with open(path, 'r') as f:
+        data = json.load(f)
+    counter = {'none': 0}
+    tot_prog_dict = {'none': 0}
+    for entry in data:
+        prog = [x for x in entry[-2] if '/True' in x]
+        if len(prog) == 0:
+            prog = entry[-2][0]
+        else:
+            prog = prog[0]
+        is_accept = entry[-1]
+        if prog is None:
+            counter['none'] += 1
+            tot_prog_dict['none'] += 1
+            continue
+        prog_type = prog.split('{')[0].strip()
+        if prog_type == 'hop':
+            prog_type = prog.split('{')[1].strip()
+            if '=' in prog_type and '/False' in prog_type:
+                prog_type = 'hop'
+        if prog_type not in counter:
+            counter[prog_type] = 0
+        if prog_type not in tot_prog_dict:
+            tot_prog_dict[prog_type] = 0
+        if is_accept:
+            counter[prog_type] += 1
+        tot_prog_dict[prog_type] += 1
+
+    counter = {k: (v, tot_prog_dict[k]) for k, v in counter.items()}
+    new_counter = dict(sorted(counter.items(), key=lambda x: x[-1][1], reverse=True))
+    pprint.pprint(new_counter, indent=2, sort_dicts=False)
+    return
+
+
 def main2():
-    fname = 'out_rbn_129.json'
-    print_check_proportion(fname)
-    show_dist_2(fname)
+    # path = Path("plstm_outputs/out_rbn_129.json")
+    path = Path("roberta_ranker_outputs/out_004.json")
+    # TODO: Fix this. Prints wrong metrics as roberta outputs discard FNs.
+    print_check_proportion(path)
+    # show_dist_2(path)
+    show_dist_3(path)
     return
 
 
