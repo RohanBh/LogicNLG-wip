@@ -10,6 +10,7 @@ import pandas as pd
 import torch
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from torch import nn
+import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 from transformers import RobertaTokenizer, AdamW, get_linear_schedule_with_warmup, \
@@ -287,7 +288,7 @@ class RobertaRanker(nn.Module):
         model.to(device)
         model.eval()
 
-        with open('data/train_ranker.json') as fp:
+        with open('data/test_ranker.json') as fp:
             data = json.load(fp)
 
         test_data = {}
@@ -311,8 +312,8 @@ class RobertaRanker(nn.Module):
                 padded_sequences = model.tokenizer(
                     sent_list, padding=True, truncation=True, return_tensors="pt")
                 output = model(padded_sequences, labels)
-                logits = output.logits
-                scores = logits[:, 1]
+                probs = F.softmax(output.logits, dim=-1)
+                scores = probs[:, 1]
                 max_score = torch.max(scores).item()
                 all_idx = [sidx for sidx, s_val in enumerate(scores.tolist()) if s_val == max_score]
                 selected_progs = [progs[i] for i in all_idx]
@@ -344,6 +345,9 @@ def init_ranker_arg_parser():
                         type=str, help="Save model and ckpt in this directory")
     parser.add_argument('--model_path', default='', type=str, help="Load model from this path")
     parser.add_argument('--ckpt_path', default='', type=str, help="Load checkpoint from this path")
+
+    # test args
+    parser.add_argument('--out_id', default='', type=str, help='Output id for storing final outputs')
     return parser.parse_args()
 
 
