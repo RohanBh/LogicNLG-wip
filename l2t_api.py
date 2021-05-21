@@ -1303,6 +1303,7 @@ def str_eq_inv(t, col, type):
     """
     if type == 'all':
         def get_lcs(a, b):
+            a, b = str(a), str(b)
             from difflib import SequenceMatcher
             match = SequenceMatcher(None, a, b).find_longest_match(0, len(a), 0, len(b))
             return a[match.a:match.a + match.size].strip()

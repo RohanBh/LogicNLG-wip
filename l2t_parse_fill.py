@@ -821,7 +821,6 @@ def dynamic_programming(name, t, orig_sent, sent, tags, mem_str, mem_num, mem_da
             if len(hist[step + 1]) > 15000:
                 break
         if len(finished) > 150 or time.time() - start_time > 60:
-            print()
             break
 
     return (name, orig_sent, sent, [_[0].cur_str for _ in finished])
