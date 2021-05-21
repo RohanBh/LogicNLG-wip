@@ -5,8 +5,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
 import torch
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
@@ -199,8 +199,12 @@ class RobertaRanker(nn.Module):
                     avg_loss = 0
 
             tb_writer.add_scalar('Train Accuracy',
-                                 np.mean(np.array(true_labels) == np.array(predict_labels)),
+                                 accuracy_score(true_labels, predict_labels),
                                  epoch_idx)
+            prec, recall, f1, _ = precision_recall_fscore_support(true_labels, predict_labels, average='binary')
+            tb_writer.add_scalar('Train Precision', prec, epoch_idx)
+            tb_writer.add_scalar('Train Recall', recall, epoch_idx)
+            tb_writer.add_scalar('Train F1', f1, epoch_idx)
 
             if (epoch_idx + 1) % args.save_every == 0:
                 torch.save({
