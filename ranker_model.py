@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import torch
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from torch import nn
@@ -64,6 +65,31 @@ def create_ranker_train_data():
 
     with open('data/train_ranker.json', 'w') as fp:
         json.dump(out_data, fp, indent=2)
+    return
+
+
+def get_stats():
+    with open('data/train_ranker.json') as fp:
+        data = json.load(fp)
+
+    num_pos = len([1 for x in data if x[-1] == 1])
+    num_neg = len([1 for x in data if x[-1] == 0])
+    assert num_neg + num_pos == len(data)
+    print(f"Pos: {num_pos}, Neg: {num_neg}, Total: {len(data)}")
+    return
+
+
+def downsample_neg():
+    with open('data/train_ranker.json') as fp:
+        data = json.load(fp)
+    pos_data = [x for x in data if x[-1] == 1]
+    neg_data = [x for x in data if x[-1] == 0]
+    ids = np.random.choice(range(len(neg_data)), 100000)
+    neg_data = [neg_data[i] for i in ids]
+    data = pos_data + neg_data
+    random.shuffle(data)
+    with open('data/train_ranker.json', 'w') as fp:
+        json.dump(data, fp, indent=2)
     return
 
 
@@ -243,6 +269,8 @@ def init_ranker_arg_parser():
 
 def main():
     # create_ranker_train_data()
+    # downsample_neg()
+    # get_stats()
     args = init_ranker_arg_parser()
     if args.do_train:
         RobertaRanker.train_ranker(args)
