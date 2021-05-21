@@ -1400,6 +1400,7 @@ class ProgramLSTM(nn.Module):
 
     @staticmethod
     def train_program_lstm(args):
+        args.dbg_sent, args.train_set = '', False
         print(args)
         save_path = args.save_base_dir / Path('plstm_models/')
         save_path.mkdir(exist_ok=True, parents=True)
@@ -1439,10 +1440,10 @@ class ProgramLSTM(nn.Module):
 
         tb_writer = SummaryWriter(log_dir=f'tensorboard/p-lstm/{recording_time}')
         print("Recording Time:", recording_time)
-        model.train()
 
         for epoch_idx in range(start_epoch, args.epochs):
             print("start training {}th epoch".format(epoch_idx))
+            model.train()
             random.shuffle(all_programs)
             for idx in tqdm(range(0, len(all_programs), args.batch_size),
                             total=len(all_programs) // args.batch_size + 1):
@@ -1474,6 +1475,22 @@ class ProgramLSTM(nn.Module):
                     'scheduler_state_dict': scheduler.state_dict()},
                     save_path / f'ws_ckpt_{epoch_idx:03}.pt')
                 model.save(save_path / f'ws_model_{epoch_idx:03}.pt')
+                model.eval()
+                with torch.no_grad():
+                    val_results = ProgramLSTM.get_model_results('data/plstm_valid.json', model, args)
+                val_results = [(x[-1], x[-2] != None) for x in val_results]
+                ctr = Counter(val_results)
+                ctr2 = {
+                    'FN': ctr[(False, False)],
+                    'FP': ctr[(False, True)],
+                    'TP': ctr[(True, True)],
+                }
+                coverage = ctr2['TP'] / len(data)
+                tb_writer.add_scalar("Validation coverage", coverage, epoch_idx)
+                tb_writer.add_scalar("Validation FN", ctr2['FN'], epoch_idx)
+                tb_writer.add_scalar("Validation FP", ctr2['FP'], epoch_idx)
+                tb_writer.add_scalar("Validation TP", ctr2['TP'], epoch_idx)
+
         tb_writer.flush()
         tb_writer.close()
         return
@@ -1629,17 +1646,7 @@ class ProgramLSTM(nn.Module):
         return
 
     @staticmethod
-    def test_program_lstm(args):
-        print(args)
-        save_path = Path('plstm_outputs/')
-        save_path.mkdir(exist_ok=True)
-        device_str = 'cuda' if args.cuda else 'cpu'
-        device = torch.device(device_str)
-
-        model = ProgramLSTM.load(args.model_path, args.cuda)
-        model.to(device)
-        model.eval()
-        in_fname = 'data/programs_filtered.json' if args.train_set else 'data/plstm_test.json'
+    def get_model_results(in_fname, model, args):
         with open(in_fname) as fp:
             data = json.load(fp)
 
@@ -1684,7 +1691,21 @@ class ProgramLSTM(nn.Module):
                 if ljsonstr is not None:
                     ljsonstr += f'={ret_val}/{is_accepted}'
                 results.append((table_name, og_sent, trans_sent, mask_val, act_list, ljsonstr, is_accepted))
+        return results
 
+    @staticmethod
+    def test_program_lstm(args):
+        print(args)
+        save_path = Path('plstm_outputs/')
+        save_path.mkdir(exist_ok=True)
+        device_str = 'cuda' if args.cuda else 'cpu'
+        device = torch.device(device_str)
+
+        model = ProgramLSTM.load(args.model_path, args.cuda)
+        model.to(device)
+        model.eval()
+        in_fname = 'data/programs_filtered.json' if args.train_set else 'data/plstm_test.json'
+        results = ProgramLSTM.get_model_results(in_fname, model, args)
         with open(save_path / f'out_{args.out_id}.json', 'w') as fp:
             json.dump(results, fp, indent=2)
         return
@@ -1828,19 +1849,12 @@ def test_program_tree():
     return
 
 
-def tmp_test():
-    parser = Parser("data/l2t/all_csv")
-    must_have_list = _get_must_haves(
-        parser,
-        'most of the hit \'n run tour concert cities were in the united states .',
-        '2-12946465-1.html.csv',
-        'most of the #hit \' n run tour;-1,-1# concert #city;0,1# be in the #united states;6,2# .')
-    print(must_have_list)
-    return
-
-
 def init_plstm_arg_parser():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--do_train', action='store_true', default=False, help='Weakly supervised training')
+    parser.add_argument('--do_test', action='store_true', default=False, help='Test')
+    parser.add_argument('--do_rl', action='store_true', default=False, help='Use RL to train PLSTM')
+
     parser.add_argument('--cuda', action='store_true', default=False, help='Use gpu')
     parser.add_argument('--model', default='gpt2', type=str,
                         help="Pretrained model to use as encoder. "
@@ -1876,14 +1890,19 @@ def init_plstm_arg_parser():
     return parser.parse_args()
 
 
-if __name__ == '__main__':
+def main():
     # create_vocab()
     # test_program_tree()
     inc_precision()
-    # tmp_test()
     args = init_plstm_arg_parser()
-    # ProgramLSTM.train_program_lstm(args)
-    # ProgramLSTM.train_rl_program_lstm(args)
-    # ProgramLSTM.test_program_lstm(args)
-    # 177, 202, 272, 301, 363, 364, 383
-    # print(get_entry(177))
+    if args.do_train:
+        ProgramLSTM.train_program_lstm(args)
+    elif args.do_rl:
+        ProgramLSTM.train_rl_program_lstm(args)
+    elif args.do_test:
+        ProgramLSTM.test_program_lstm(args)
+    return
+
+
+if __name__ == '__main__':
+    main()

@@ -2367,9 +2367,9 @@ def create_plstm_test_data():
     new_results = []
     # inputs[0], inputs[1], linked_sent, masked_val, mem_str, mem_num, mem_date, len(c), result
     for res in tqdm(results):
-        if res is None:
+        if res[0] is None:
             continue
-        table_name, og_sent, linked_sent, masked_val, mem_str, mem_num, mem_data, masked_sent, mapping = res
+        table_name, og_sent, linked_sent, masked_val, mem_str, mem_num, mem_data, masked_sent, mapping = res[0]
         table = pd.read_csv(f'data/l2t/all_csv/{table_name}', delimiter="#")
         col2type = get_col_types(table)
         cols = table.columns.tolist()
