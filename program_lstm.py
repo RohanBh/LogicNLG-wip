@@ -27,7 +27,11 @@ NEW_TOKENS = ['hfuewjlr', 'cotbwpry', 'gyhulcem', 'uzdfpzvk', 'gifyoazr', 'ogvrh
               'nvoqnztx', 'zfjxetwn', 'rioxievv', 'ccfriagn', 'nqhuopoc', 'huombchu', 'udpvyfhn', 'kjjyzupm',
               'dmpfjonu', 'bwzxwcoa', 'iezmaqxb', 'qidywllz', 'glrximum', 'cqwpuiux', 'zxlwfmab', 'bcixyahe',
               'vuxnzyfm', 'taynudla', 'vmxlasbt', 'fpvzuurn', 'srdstkko', 'bytzjzbf', 'zwwszhfu', 'viyhhwec',
-              'uzmtiymv', 'wdncdeqw', 'vdkrbghd']
+              'uzmtiymv', 'wdncdeqw', 'vdkrbghd',
+
+              '[MASK]', '[ENT_START]', '[ENT_END]', '[HDR_START]', '[HDR_END]',
+              '^#', '#^', '[TITLE_START]', '[TITLE_END]', '[N_START]', '[N_END]'
+              ]
 
 
 def create_vocab():
@@ -857,10 +861,7 @@ class ProgramLSTM(nn.Module):
         else:
             self.tokenizer = BertTokenizer.from_pretrained(model_name)
 
-        new_tokens = ['[MASK]', '[ENT_START]', '[ENT_END]', '[HDR_START]', '[HDR_END]',
-                      '^#', '#^', '[TITLE_START]', '[TITLE_END]', '[N_START]', '[N_END]']
-        new_tokens.extend(NEW_TOKENS)
-        self.tokenizer.add_tokens(new_tokens)
+        self.tokenizer.add_tokens(NEW_TOKENS)
         self.tokenizer_dict = {
             'ent_start_tok': self.tokenizer.convert_tokens_to_ids('[ENT_START]'),
             'ent_end_tok': self.tokenizer.convert_tokens_to_ids('[ENT_END]'),
@@ -1426,7 +1427,7 @@ class ProgramLSTM(nn.Module):
         optimizer = AdamW(model.parameters(), args.lr)
         scheduler = get_linear_schedule_with_warmup(
             optimizer, num_warmup_steps=args.warmup_steps,
-            num_training_steps=args.epochs * len(all_programs) // args.batch_size + 1)
+            num_training_steps=args.epochs * (len(all_programs) // args.batch_size + 1))
 
         global_step = avg_loss = start_epoch = 0
 
@@ -1485,7 +1486,7 @@ class ProgramLSTM(nn.Module):
                     'FP': ctr[(False, True)],
                     'TP': ctr[(True, True)],
                 }
-                coverage = ctr2['TP'] / len(data)
+                coverage = ctr2['TP'] / len(val_results)
                 tb_writer.add_scalar("Validation coverage", coverage, epoch_idx)
                 tb_writer.add_scalar("Validation FN", ctr2['FN'], epoch_idx)
                 tb_writer.add_scalar("Validation FP", ctr2['FP'], epoch_idx)
@@ -1893,7 +1894,7 @@ def init_plstm_arg_parser():
 def main():
     # create_vocab()
     # test_program_tree()
-    inc_precision()
+    # inc_precision()
     args = init_plstm_arg_parser()
     if args.do_train:
         ProgramLSTM.train_program_lstm(args)
