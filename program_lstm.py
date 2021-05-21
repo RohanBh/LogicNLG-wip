@@ -20,7 +20,7 @@ from transformers import GPT2Model, GPT2Tokenizer, RobertaTokenizer, RobertaMode
     get_linear_schedule_with_warmup
 
 from APIs import non_triggers
-from l2t_api import APIs, memory_arg_funcs, check_if_accept
+from l2t_api import APIs, memory_arg_funcs, check_if_accept, sharper_triggers, pat_month, pat_year, pat_day, month_map
 from l2t_parse_fill import Parser, split, get_col_types
 
 NEW_TOKENS = ['hfuewjlr', 'cotbwpry', 'gyhulcem', 'uzdfpzvk', 'gifyoazr', 'ogvrhlel', 'hrcdtosp', 'yvyzclyh',
@@ -49,12 +49,13 @@ def create_vocab():
     return
 
 
-def _get_must_haves(parser, og_sent, table_name, linked_sent):
+def _get_must_haves(parser, og_sent, table_name, linked_sent, trigger_type='soft'):
     raw_sent, tags = parser.normalize(og_sent)
     raw_sent = " ".join(raw_sent)
     sent = parser.initialize_buffer(table_name, linked_sent, tags, raw_sent)[0]
     must_have = []
-    for k, v in non_triggers.items():
+    triggers = non_triggers if trigger_type == 'soft' else sharper_triggers
+    for k, v in triggers.items():
         if isinstance(v[0], list):
             flags = []
             for v_sub in v:
@@ -108,6 +109,48 @@ def _compare(_a, _b):
         return _a == _b
     except:
         return False
+
+
+def _date_compare(actual, returned):
+    if len(re.findall(pat_month, actual)) > 0:
+        year_val1 = re.findall(pat_year, actual)
+        year_val2 = re.findall(pat_year, returned)
+        b1, b2 = len(year_val1) == 0, len(year_val2) == 0
+        if (b1 and not b2) or (not b1 and b2):
+            return False
+
+        month_val1 = re.findall(pat_month, actual)
+        month_val2 = re.findall(pat_month, returned)
+        b1, b2 = len(month_val1) == 0, len(month_val2) == 0
+        if (b1 and not b2) or (not b1 and b2):
+            return False
+
+        day_val1 = re.findall(pat_day, actual)
+        day_val2 = re.findall(pat_day, returned)
+        b1, b2 = len(day_val1) == 0, len(day_val2) == 0
+        if (b1 and not b2) or (not b1 and b2):
+            return False
+
+        if len(year_val1) == 0:
+            year_val1 = year_val2 = int("2260")
+        else:
+            year_val1 = int(year_val1[0])
+            year_val2 = int(year_val2[0])
+
+        if len(day_val1) == 0:
+            day_val1 = day_val2 = int("1")
+        else:
+            day_val1 = int(day_val1[0])
+            day_val2 = int(day_val2[0])
+
+        if len(month_val1) == 0:
+            month_val1 = month_val2 = int("1")
+        else:
+            month_val1 = month_map[month_val1[0]]
+            month_val2 = month_map[month_val2[0]]
+
+        return (year_val1, month_val1, day_val1) == (year_val2, month_val2, day_val2)
+    return False
 
 
 def inc_precision(thresh=3, test_sent=''):
@@ -189,17 +232,12 @@ def inc_precision(thresh=3, test_sent=''):
             continue
         # do trigger-word based filtering to remove false positives
         must_have_list = _get_must_haves(parser, entry[1], entry[0], entry[2])
-
         new_program_list = [p_ix for p_ix, p in enumerate(programs) if any([f'{mh} {{' in p for mh in must_have_list])]
-        # if len(new_program_list) == 1:
-        #     new_data.append((*get_new_entry(entry, cols, col2type)[:-1], new_program_list))
-        #     continue
         all_programs_list.append(new_program_list)
 
-        new_program_list = [p_ix for p_ix, p in enumerate(programs) if all([f'{mh} {{' in p for mh in must_have_list])]
-        # if len(new_program_list) == 1:
-        #     new_data.append((*get_new_entry(entry, cols, col2type)[:-1], new_program_list))
-        #     continue
+        # do a more intense trigger based filtering to differentiate 'more' from 'less'
+        must_have_list = _get_must_haves(parser, entry[1], entry[0], entry[2], trigger_type='hard')
+        new_program_list = [p_ix for p_ix, p in enumerate(programs) if any([f'{mh} {{' in p for mh in must_have_list])]
         all_programs_list.append(new_program_list)
 
         # Do filtering based on used arguments
@@ -210,6 +248,8 @@ def inc_precision(thresh=3, test_sent=''):
         # 4. In case of max { all_rows ; header } and hop { argmax { all_row ; header} ; header } choose first.
         # 5. Select the ones which generate the full str output instead of just the int part
         # 6. Select the ones which rely on nth_arg if present
+        # 7. If the mask matches pat_month, reject _num programs
+        # 8. Out of all date generating programs, choose the most specific one
         program_trees = [ProgramTree.from_str(p_str) for p_str in programs]
         msk_header = entry[3][0][4:].strip()
         if msk_header == 'input':
@@ -263,6 +303,16 @@ def inc_precision(thresh=3, test_sent=''):
         if any(msk_num for msk_num in entry[5] if msk_num[0] == 'ntharg'):
             ordinal_funcs = ['nth_max {', 'nth_argmin {', 'nth_argmax {', 'nth_min {']
             new_program_list = [p_ix for p_ix, p in enumerate(programs) if any(f in p for f in ordinal_funcs)]
+            all_programs_list.append(new_program_list)
+
+        if len(re.findall(pat_month, str(entry[3][1]))) > 0:
+            new_program_list = []
+            for p_ix, prog in enumerate(programs):
+                if '_date {' not in prog:
+                    continue
+                ret_val = prog[prog.rfind('=') + 1:-5]
+                if _date_compare(str(entry[3][1]), ret_val):
+                    new_program_list.append(p_ix)
             all_programs_list.append(new_program_list)
 
         # filter based on count
@@ -1829,11 +1879,11 @@ def init_plstm_arg_parser():
 if __name__ == '__main__':
     # create_vocab()
     # test_program_tree()
-    # inc_precision()
+    inc_precision()
     # tmp_test()
     args = init_plstm_arg_parser()
     # ProgramLSTM.train_program_lstm(args)
-    ProgramLSTM.train_rl_program_lstm(args)
+    # ProgramLSTM.train_rl_program_lstm(args)
     # ProgramLSTM.test_program_lstm(args)
     # 177, 202, 272, 301, 363, 364, 383
     # print(get_entry(177))

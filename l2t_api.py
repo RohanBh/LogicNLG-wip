@@ -1409,3 +1409,68 @@ def check_if_accept(func, returned, actual):
         return any(obj_compare(actual, ret_val) for ret_val in returned)
 
     return False
+
+
+sharper_triggers = {}
+sharper_triggers['avg'] = ['average']
+
+sharper_triggers['diff'] = ['after', 'before', 'difference', 'gap', 'than', 'separate', 'except', 'but', 'separation']
+sharper_triggers['add'] = ['sum', 'summation', 'combine', 'combined', 'total', 'add', 'all', 'there are']
+sharper_triggers['sum'] = sharper_triggers['add']
+
+sharper_triggers['not_eq'] = ['not', 'no', 'never', "didn't", "won't", "wasn't", "isn't",
+                              "haven't", "weren't", "won't", 'neither', 'none', 'unable',
+                              'fail', 'different', 'outside', 'unable', 'fail']
+
+sharper_triggers['filter_str_not_eq'] = sharper_triggers['not_eq']
+sharper_triggers['filter_not_eq'] = sharper_triggers['not_eq']
+
+sharper_triggers["filter_greater"] = ['higher', 'greater', 'more', 'than', 'above', 'after', 'through', 'to', 'between']
+sharper_triggers["filter_less"] = ['lower', 'earlier', 'less', 'than', 'below', 'under', 'before',
+                                   'through', 'to', 'between']
+sharper_triggers['less'] = ['lower', 'earlier', 'less', 'than', 'before', 'below', 'under']
+sharper_triggers['greater'] = ['higher', 'greater', 'more', 'than', 'above', 'after', 'exceed', 'over']
+
+sharper_triggers['all_eq'] = ['all', 'every', 'each', 'only', 'always']
+sharper_triggers['all_less'] = [['all', 'every', 'each'], sharper_triggers['less']]
+sharper_triggers['all_greater'] = [['all', 'every', 'each'], sharper_triggers['greater']]
+sharper_triggers['all_str_eq'] = ['all', 'every', 'each', 'always']
+
+sharper_triggers["all_str_not_eq"] = [['all', 'every', 'each', 'always'],
+                                      ['not', 'no', 'never', "didn't", "won't", "wasn't"]]
+sharper_triggers["all_not_eq"] = sharper_triggers["all_str_not_eq"]
+
+sharper_triggers['filter_less_eq'] = ['at most']
+sharper_triggers['filter_greater_eq'] = ['at least']
+
+sharper_triggers['all_less_eq'] = [sharper_triggers['filter_less_eq'], ['all', 'while', 'every', 'each']]
+sharper_triggers['all_greater_eq'] = [sharper_triggers['filter_greater_eq'], ['all', 'while', 'every', 'each']]
+
+sharper_triggers['max'] = ['highest', 'most', 'greatest', 'maximum', 'max']
+sharper_triggers['min'] = ['lowest', 'earliest', 'least', 'smallest', 'minimum', 'min']
+
+sharper_triggers['argmax'] = ['highest', 'most', 'greatest', 'maximum', 'max', 'top', 'first']
+sharper_triggers['argmin'] = ['lowest', 'earliest', 'least', 'smallest', 'minimum', 'min', 'bottom', 'last']
+
+# Inverse non triggers
+sharper_triggers['greater_str_inv'] = sharper_triggers['greater']
+sharper_triggers['less_str_inv'] = sharper_triggers['less']
+
+sharper_triggers['most_eq_inv_date'] = sharper_triggers['most_eq_inv_num'] = ['most', 'majority']
+sharper_triggers['most_str_eq_inv'] = sharper_triggers['most_eq_inv_date']
+sharper_triggers['most_greater_inv_date'] = sharper_triggers['most_greater_inv_num'] = sharper_triggers[
+    'most_eq_inv_date']
+sharper_triggers['most_greater_eq_inv_date'] = sharper_triggers['most_greater_eq_inv_num'] = [
+    sharper_triggers['filter_greater_eq'], sharper_triggers['most_eq_inv_date']]
+sharper_triggers['most_less_inv_date'] = sharper_triggers['most_less_inv_num'] = [
+    sharper_triggers["filter_less"], sharper_triggers['most_eq_inv_date']]
+sharper_triggers['most_less_eq_inv_date'] = sharper_triggers['most_less_eq_inv_num'] = sharper_triggers[
+    'most_eq_inv_date']
+
+sharper_triggers['all_str_eq_inv'] = sharper_triggers['all_str_eq']
+sharper_triggers['all_greater_inv_date'] = sharper_triggers['all_greater_inv_num'] = sharper_triggers['all_greater']
+sharper_triggers['all_greater_eq_inv_date'] = sharper_triggers['all_greater_eq_inv_num'] = sharper_triggers[
+    'all_greater_eq']
+sharper_triggers['all_less_inv_date'] = sharper_triggers['all_less_inv_num'] = sharper_triggers['all_less']
+sharper_triggers['all_less_eq_inv_date'] = sharper_triggers['all_less_eq_inv_num'] = sharper_triggers['all_less_eq']
+sharper_triggers['all_eq_inv_date'] = sharper_triggers['all_eq_inv_num'] = sharper_triggers['all_eq']
