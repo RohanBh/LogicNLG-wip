@@ -23,7 +23,7 @@ from transformers import GPT2Model, GPT2Tokenizer, RobertaTokenizer, RobertaMode
 from APIs import non_triggers
 from l2t_api import APIs, memory_arg_funcs, check_if_accept, sharper_triggers, pat_month, pat_year, pat_day, month_map
 from l2t_parse_fill import Parser, split, get_col_types
-from ranker_model import RobertaRanker
+from utils import tile
 
 NEW_TOKENS = ['hfuewjlr', 'cotbwpry', 'gyhulcem', 'uzdfpzvk', 'gifyoazr', 'ogvrhlel', 'hrcdtosp', 'yvyzclyh',
               'nvoqnztx', 'zfjxetwn', 'rioxievv', 'ccfriagn', 'nqhuopoc', 'huombchu', 'udpvyfhn', 'kjjyzupm',
@@ -1428,6 +1428,9 @@ class ProgramLSTM(nn.Module):
         self.eval()
 
         sent_encodings, pad_masks = self.encode(padded_sequences)
+        if beam_width > 1:
+            sent_encodings = tile(sent_encodings, 0, beam_width, self.new_long_tensor)
+            pad_masks = tile(pad_masks, 0, beam_width, self.new_long_tensor)
         hc_pair = self.init_decoder_state(sent_encodings)
         transformed_sent_encodings = self.attn_1_linear(sent_encodings)
         zero_action_embed = self.new_tensor(self.action_embed_size).zero_()
@@ -1439,7 +1442,7 @@ class ProgramLSTM(nn.Module):
             if all(bsn.finished for bsn_arr in beam_search_nodes for bsn in bsn_arr):
                 break
             if t == 0:
-                x = self.new_tensor(batch_size, self.decoder_lstm.input_size).zero_()
+                x = self.new_tensor(batch_size * beam_width, self.decoder_lstm.input_size).zero_()
             else:
                 prev_action_embeds = []
                 # shape - (batch_size x beam_width, )
@@ -1910,6 +1913,7 @@ class ProgramLSTM(nn.Module):
     def get_model_results(in_fname, model, args):
         assert args.top_k == 1 or len(args.ranker_model_path) > 0
         if len(args.ranker_model_path) > 0 and args.top_k > 1:
+            from ranker_model import RobertaRanker
             ranker_model = RobertaRanker.load(args.model_path, args.cuda)
             device_str = 'cuda' if args.cuda else 'cpu'
             device = torch.device(device_str)
@@ -1964,11 +1968,12 @@ class ProgramLSTM(nn.Module):
                         ljsonstr = None
                     if ljsonstr is not None:
                         ljsonstr += f'={ret_val}/{is_accepted}'
-                        label = ljsonstr[ljsonstr.rfind('/') + 1:] == 'True'
-                        prog = ljsonstr[:ljsonstr.rfind('=')]
-                        ip_sent = RobertaRanker._get_input_sent(trans_sent, prog, model)
-                        ranker_input.append((ip_sent, label))
-                        prog_data.append((act_list, ljsonstr, is_accepted))
+                        if args.top_k > 1:
+                            label = ljsonstr[ljsonstr.rfind('/') + 1:] == 'True'
+                            prog = ljsonstr[:ljsonstr.rfind('=')]
+                            ip_sent = RobertaRanker._get_input_sent(trans_sent, prog, model)
+                            ranker_input.append((ip_sent, label))
+                            prog_data.append((act_list, ljsonstr, is_accepted))
                     sample_data = act_list, ljsonstr, is_accepted
                 with torch.no_grad():
                     if len(ranker_input) > 0 and args.top_k > 1:

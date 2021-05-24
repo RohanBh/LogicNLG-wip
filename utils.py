@@ -242,3 +242,12 @@ def powerset(iterable):
     "powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(len(s) + 1))
+
+
+def tile(a, dim, n_tile, new_long_tensor):
+    init_dim = a.size(dim)
+    repeat_idx = [1] * a.dim()
+    repeat_idx[dim] = n_tile
+    a = a.repeat(*(repeat_idx))
+    order_index = new_long_tensor(np.concatenate([init_dim * np.arange(n_tile) + i for i in range(init_dim)]))
+    return torch.index_select(a, dim, order_index)
