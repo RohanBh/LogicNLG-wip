@@ -1,4 +1,5 @@
 import argparse
+import copy
 import json
 # noinspection PyUnresolvedReferences
 import pprint
@@ -22,6 +23,7 @@ from transformers import GPT2Model, GPT2Tokenizer, RobertaTokenizer, RobertaMode
 from APIs import non_triggers
 from l2t_api import APIs, memory_arg_funcs, check_if_accept, sharper_triggers, pat_month, pat_year, pat_day, month_map
 from l2t_parse_fill import Parser, split, get_col_types
+from ranker_model import RobertaRanker
 
 NEW_TOKENS = ['hfuewjlr', 'cotbwpry', 'gyhulcem', 'uzdfpzvk', 'gifyoazr', 'ogvrhlel', 'hrcdtosp', 'yvyzclyh',
               'nvoqnztx', 'zfjxetwn', 'rioxievv', 'ccfriagn', 'nqhuopoc', 'huombchu', 'udpvyfhn', 'kjjyzupm',
@@ -710,6 +712,7 @@ class ProgramTreeBatch:
                     continue
                 elif tok == self.tokenizer_dict[end_tok]:
                     inside1 = False
+                    copy_tok = False
                     continue
                 if copy_tok:
                     token_pos_list.append(tok_idx)
@@ -806,11 +809,12 @@ class PointerNet(nn.Module):
         super(PointerNet, self).__init__()
         self.proj_linear = nn.Linear(encoder_hidden_size, query_vec_size, bias=False)
 
-    def forward(self, sent_encodings, copy_token_mask, query_vec):
+    def forward(self, sent_encodings, copy_token_mask, query_vec, get_log_prob=False):
         """
         :param sent_encodings: (batch_size, seq_len, encoder_hidden_size)
         :param copy_token_mask: (action_seq_len, batch_size, seq_len) contains bool which indicates the positions to potentially copy
         :param query_vec: (action_seq_len, batch_size, attn_vector_size)
+        :param get_log_prob: Set True to get log probs instead of probs
         :return: (action_seq_len, batch_size, seq_len) copy probs
         """
         sent_encodings = self.proj_linear(sent_encodings)
@@ -830,8 +834,38 @@ class PointerNet(nn.Module):
         weights.data.masked_fill_(~copy_token_mask, -float('inf'))
 
         # (action_seq_len, batch_size, seq_len)
-        ptr_weights = F.softmax(weights, dim=-1)
+        ptr_weights = F.softmax(weights, dim=-1) if not get_log_prob else F.log_softmax(weights, dim=-1)
         return ptr_weights
+
+
+class BeamSearchNode:
+    """
+    Represents a (partial) program in the decoding phase
+    """
+
+    def __init__(self):
+        self.finished = False
+        self.finished_action_idx = None
+        # Shape - (n_actions, hidden_vector_size)
+        self.hidden_vectors = []
+        # Shape - (n_actions, ). Contains ('func', func_id) or ('tok', gen_tok)
+        self.history_actions = []
+        # Shape - (n_actions, ). Contains ptrs to parents for prev actions. Store -1 in case of no parents
+        self.all_parent_ptrs = [None]
+        # Stores the parent pointer for the frontier node
+        self.curr_parent_ptr = None
+        self.curr_field = None
+        self.score = 0
+
+    def clone(self, log_prob, act):
+        tmp = copy.deepcopy(self)
+        tmp.update_score(log_prob)
+        tmp.history_actions.append(act)
+        return tmp
+
+    def update_score(self, log_prob):
+        self.score += log_prob
+        return
 
 
 class ProgramLSTM(nn.Module):
@@ -1154,6 +1188,7 @@ class ProgramLSTM(nn.Module):
         Args:
             padded_sequences: dict containing input_ids & attention mask of shape (batch_size, max_seq_len/seq_len)
             max_actions: Integer indicating the maximum actions to generate
+            train_rl: If parsing is used while training with an RL objective
 
         Returns:
         """
@@ -1177,7 +1212,6 @@ class ProgramLSTM(nn.Module):
         transformed_sent_encodings = self.attn_1_linear(sent_encodings)
         zero_action_embed = self.new_tensor(self.action_embed_size).zero_()
 
-        attn_vecs = []
         history_states = []
         # n_actions indicates actions taken before (history)
         # Shape - (n_actions, batch_size). Contains ('func', func_id) or ('tok', gen_tok)
@@ -1293,6 +1327,7 @@ class ProgramLSTM(nn.Module):
                             continue
                         elif tok == self.tokenizer_dict[end_tok]:
                             inside = False
+                            copy_tok = False
                             continue
                         if copy_tok:
                             token_pos_list.append(tok_idx)
@@ -1349,7 +1384,6 @@ class ProgramLSTM(nn.Module):
 
             all_parent_ptrs.append(parent_ptrs)
             history_states.append(hc_pair)
-            attn_vecs.append(attn_t)
             prev_attn_t = attn_t
 
         # (batch_size, n_actions_variable)
@@ -1368,6 +1402,232 @@ class ProgramLSTM(nn.Module):
             return new_history_actions
         else:
             return new_history_actions, log_probs, values
+
+    def beam_parse(self, padded_sequences, max_actions, top_k=1, beam_width=1):
+        """Do a beam search to generate target actions given an input sentence
+
+        Args:
+            padded_sequences: dict containing input_ids & attention mask of shape (batch_size, max_seq_len/seq_len)
+            max_actions: Integer indicating the maximum actions to generate
+            top_k: Top k results to return for each input seq
+            beam_width: Beam width for beam search
+
+        Returns:
+        """
+        assert beam_width >= top_k
+
+        if self.device != torch.device('cpu'):
+            # (batch_size, seq_len)
+            input_ids = padded_sequences['input_ids'].cuda()
+            T = torch.cuda
+        else:
+            input_ids = padded_sequences['input_ids']
+            T = torch
+
+        batch_size = input_ids.size(0)
+        self.eval()
+
+        sent_encodings, pad_masks = self.encode(padded_sequences)
+        hc_pair = self.init_decoder_state(sent_encodings)
+        transformed_sent_encodings = self.attn_1_linear(sent_encodings)
+        zero_action_embed = self.new_tensor(self.action_embed_size).zero_()
+
+        # Shape - (batch_size, beam_width)
+        beam_search_nodes = [[BeamSearchNode() for _ in range(beam_width)] for _ in range(batch_size)]
+
+        for t in range(max_actions):
+            if all(bsn.finished for bsn_arr in beam_search_nodes for bsn in bsn_arr):
+                break
+            if t == 0:
+                x = self.new_tensor(batch_size, self.decoder_lstm.input_size).zero_()
+            else:
+                prev_action_embeds = []
+                # shape - (batch_size x beam_width, )
+                for batch_id in range(batch_size):
+                    for bw_id in range(beam_width):
+                        bsn = beam_search_nodes[batch_id][bw_id]
+                        if not bsn.finished:
+                            prev_action = bsn.history_actions[t - 1]
+                            if prev_action[0] == 'func':
+                                prev_action_embed = self.action_embed.weight[prev_action[1]]
+                            else:
+                                prev_action_embed = zero_action_embed
+                        else:
+                            prev_action_embed = zero_action_embed
+                        prev_action_embeds.append(prev_action_embed)
+                prev_action_embeds = torch.stack(prev_action_embeds)
+
+                # (batch_size x beam_width, ) Contains the ids of parent_actions
+                parent_actions_ids = []
+                for batch_id in range(batch_size):
+                    for bw_id in range(beam_width):
+                        bsn = beam_search_nodes[batch_id][bw_id]
+                        if not bsn.finished:
+                            parent_actions_ids.append(bsn.history_actions[bsn.curr_parent_ptr][1])
+                        else:
+                            parent_actions_ids.append(0)
+                parent_actions_ids = T.LongTensor(parent_actions_ids)
+                # (batch_size x beam_width, action_embed_size)
+                parent_action_embed = self.action_embed(parent_actions_ids)
+                # (batch_size x beam_width, ) stores curr field names
+                parent_field_ids = []
+                for batch_id in range(batch_size):
+                    for bw_id in range(beam_width):
+                        bsn = beam_search_nodes[batch_id][bw_id]
+                        if not bsn.finished:
+                            # ('func', func_id)
+                            p_action_info = bsn.history_actions[bsn.curr_parent_ptr]
+                            p_action_name = self.inv_vocab['actions'][p_action_info[1]]
+                            arg_idx = len([a for a in bsn.all_parent_ptrs if a == bsn.curr_parent_ptr]) - 1
+                            ftype = APIs[p_action_name]['model_args'][arg_idx]
+                            parent_field_ids.append(self.vocab['fields'][ftype])
+                            bsn.curr_field = ftype
+                        else:
+                            parent_field_ids.append(0)
+                            bsn.curr_field = 'no_field'
+
+                parent_field_ids = T.LongTensor(parent_field_ids)
+                # (batch_size x beam_width, field_embed_size)
+                parent_field_embed = self.field_embed(parent_field_ids)
+
+                # (batch_size x beam_width, decoder_hidden_size)
+                parent_states = []
+                for batch_id in range(batch_size):
+                    for bw_id in range(beam_width):
+                        bsn = beam_search_nodes[batch_id][bw_id]
+                        if not bsn.finished:
+                            parent_states.append(bsn.hidden_vectors[bsn.curr_parent_ptr])
+                        else:
+                            parent_states.append(bsn.hidden_vectors[0])
+                parent_states = torch.stack(parent_states)
+
+                inputs = [prev_action_embeds, prev_attn_t, parent_action_embed,
+                          parent_field_embed, parent_states]
+                x = torch.cat(inputs, dim=-1)
+
+            # (batch_size x beam_width, decoder_hidden_size) - ht, ct
+            # (batch_size x beam_width, attn_vector_size)
+            hc_pair, attn_t = self.decoder_step(
+                x, hc_pair, sent_encodings, transformed_sent_encodings, attn_token_mask=pad_masks)
+
+            unflat_attn_t = attn_t.view(batch_size, beam_width, self.attn_vec_size)
+            unflat_hidd_vec = hc_pair[0].view(batch_size, beam_width, self.decoder_hidden_size)
+            # Choose between the following two based on the field embed (is it a row, is it a hdr, mem, n?)
+            # shape - (batch_size x beam_width, num_actions)
+            new_beam_search_nodes = {}
+            for batch_id in range(batch_size):
+                for bw_id in range(beam_width):
+                    bsn = beam_search_nodes[batch_id][bw_id]
+                    new_beam_search_nodes[(batch_id, bw_id)] = []
+                    if bsn.finished:
+                        bsn.history_actions.append(('func', 0))
+                        new_beam_search_nodes[(batch_id, bw_id)].append(bsn)
+                        continue
+                    if t == 0 or bsn.curr_field in ['row', 'obj']:
+                        # shape - (num_actions,)
+                        apply_func_log_prob = F.log_softmax(
+                            self.action_readout(unflat_attn_t[batch_id][bw_id]), dim=-1)
+                        for func_id, log_prob in enumerate(apply_func_log_prob.tolist()):
+                            if not np.isfinite(log_prob):
+                                continue
+                            new_beam_search_nodes[(batch_id, bw_id)].append(bsn.clone(log_prob, ('func', func_id)))
+                    else:
+                        # create copy_mask which has 1 where we can copy entities
+                        if bsn.curr_field == 'n':
+                            start_tok, end_tok = 'n_start_tok', 'n_end_tok'
+                        elif 'header' in bsn.curr_field:
+                            start_tok, end_tok = 'hdr_start_tok', 'hdr_end_tok'
+                        elif 'memory' in bsn.curr_field:
+                            start_tok, end_tok = 'ent_start_tok', 'ent_end_tok'
+                        else:
+                            raise ValueError(f"Wrong branch! Can't copy for the field {bsn.curr_field}")
+
+                        inside = False
+                        copy_tok = False
+                        token_pos_list = []
+
+                        for tok_idx, tok in enumerate(input_ids[batch_id]):
+                            tok = get_val(tok)
+                            if tok == self.tokenizer_dict[start_tok]:
+                                inside = True
+                                continue
+                            elif tok == self.tokenizer_dict['fval_end_tok'] and inside:
+                                copy_tok = True
+                                continue
+                            elif tok == self.tokenizer_dict[end_tok]:
+                                inside = False
+                                copy_tok = False
+                                continue
+                            if copy_tok:
+                                token_pos_list.append(tok_idx)
+                                copy_tok = False
+                        # (seq_len, )
+                        copy_mask = np.zeros((input_ids.size(1),), dtype='float32')
+                        copy_mask[token_pos_list] = 1
+                        copy_mask = torch.from_numpy(copy_mask).bool()
+                        if self.device != torch.device('cpu'):
+                            copy_mask = copy_mask.cuda()
+                        # (1, 1, seq_len)
+                        copy_mask = copy_mask.unsqueeze(0).unsqueeze(0)
+                        copy_log_prob = self.pointer_net(
+                            sent_encodings[batch_id].unsqueeze(0), copy_mask,
+                            attn_t[batch_id, :].unsqueeze(0).unsqueeze(0), get_log_prob=True)
+                        copy_log_prob = copy_log_prob.squeeze(0).squeeze(0)
+                        for tok_idx, log_prob in enumerate(copy_log_prob.tolist()):
+                            if not np.isfinite(log_prob):
+                                continue
+                            next_tok = self.tokenizer.decode(input_ids[batch_id][tok_idx])
+                            new_beam_search_nodes[(batch_id, bw_id)].append(bsn.clone(log_prob, ('tok', next_tok)))
+
+            # check if any outstanding actions are left
+            pseudo_funcs = [self.vocab['actions']['nop'], self.vocab['actions']['all_rows']]
+            for batch_id in range(batch_size):
+                for bw_id in range(beam_width):
+                    for bsn in new_beam_search_nodes[(batch_id, bw_id)]:
+                        if bsn.finished:
+                            continue
+                        func2sat = {a_idx: False for a_idx, a in enumerate(bsn.history_actions)
+                                    if a[0] == 'func' and a[1] not in pseudo_funcs}
+                        func2numargs = {a_idx: 0 for a_idx in func2sat.keys()}
+                        for a_idx, a in enumerate(bsn.history_actions):
+                            parent_action_idx = bsn.all_parent_ptrs[a_idx]
+                            if parent_action_idx is not None:
+                                func2numargs[parent_action_idx] += 1
+                        for a_idx, num_args in func2numargs.items():
+                            fn = self.inv_vocab['actions'][bsn.history_actions[a_idx][1]]
+                            if len(APIs[fn]['model_args']) <= num_args:
+                                func2sat[a_idx] = True
+                        bsn.finished = all(func2sat.values())
+                        if bsn.finished:
+                            bsn.finished_action_idx = t
+                        if not bsn.finished:
+                            bsn.curr_parent_ptr = max(a_idx for a_idx in func2sat.keys() if not func2sat[a_idx])
+                        bsn.all_parent_ptrs.append(bsn.curr_parent_ptr)
+                        bsn.hidden_vectors.append(unflat_hidd_vec[batch_id][bw_id])
+
+            prev_attn_t = attn_t
+            beam_search_nodes = [[] for _ in range(batch_size)]
+            for batch_id in range(batch_size):
+                candidate_bsns = [new_beam_search_nodes[(batch_id, bw_id)] for bw_id in range(beam_width)]
+                candidate_bsns = [x for y in candidate_bsns for x in y]
+                candidate_bsns = sorted(candidate_bsns, key=lambda bsn: bsn.score, reverse=True)
+                beam_search_nodes[batch_id] = candidate_bsns[:beam_width]
+
+        # (batch_size, top_k, n_actions_variable)
+        new_history_actions = [[[] for _ in range(top_k)] for _ in range(batch_size)]
+        for batch_id in range(batch_size):
+            selected_bsns = sorted(beam_search_nodes[batch_id], key=lambda bsn: bsn.score, reverse=True)
+            selected_bsns = selected_bsns[:top_k]
+            for k_id, bsn in enumerate(selected_bsns):
+                tot_actions = bsn.finished_action_idx + 1 if bsn.finished_action_idx is not None else max_actions
+                for action_idx in range(tot_actions):
+                    atype, aid = bsn.history_actions[action_idx]
+                    if atype == 'func':
+                        new_history_actions[batch_id][k_id].append(('func', self.inv_vocab['actions'][aid]))
+                    elif atype == 'tok':
+                        new_history_actions[batch_id][k_id].append(('tok', aid))
+
+        return new_history_actions
 
     def save(self, path):
         path = Path(path)
@@ -1647,7 +1907,15 @@ class ProgramLSTM(nn.Module):
         return
 
     @staticmethod
-    def get_model_results(in_fname, model, args):
+    def get_model_results(in_fname, model, args, top_k=1, beam_width=1):
+        assert top_k == 1 or len(args.ranker_model_path) > 0
+        if len(args.ranker_model_path) > 0 and top_k > 1:
+            ranker_model = RobertaRanker.load(args.model_path, args.cuda)
+            device_str = 'cuda' if args.cuda else 'cpu'
+            device = torch.device(device_str)
+            ranker_model.to(device)
+            ranker_model.eval()
+
         with open(in_fname) as fp:
             data = json.load(fp)
 
@@ -1672,26 +1940,54 @@ class ProgramLSTM(nn.Module):
 
             padded_sequences = model.tokenizer(sent_list, padding=True, truncation=True, return_tensors="pt")
             with torch.no_grad():
-                model_out = model.parse(padded_sequences, args.max_actions)
+                model_out = model.beam_parse(padded_sequences, args.max_actions, top_k, beam_width)
 
             for e_idx in range(len(entries)):
-                act_list, trans_sent, table_name = model_out[e_idx], sent_list[e_idx], table_names[e_idx]
+                trans_sent, table_name = sent_list[e_idx], table_names[e_idx]
                 mask_val, og_sent = masked_vals[e_idx], og_sent_list[e_idx]
                 mask_val = (mask_val[0], str(mask_val[1]))
-                logic_json, ret_val = None, None
-                try:
-                    logic_json = ProgramTree.get_logic_json_from_action_list(act_list, trans_sent)
-                    ret_val = ProgramTree.execute(table_name, logic_json)
-                    is_accepted = check_if_accept(logic_json['func'], ret_val, mask_val[1])
-                except Exception as err:
-                    is_accepted = False
-                try:
-                    ljsonstr = ProgramTree.logic_json_to_str(logic_json)
-                except:
-                    ljsonstr = None
-                if ljsonstr is not None:
-                    ljsonstr += f'={ret_val}/{is_accepted}'
-                results.append((table_name, og_sent, trans_sent, mask_val, act_list, ljsonstr, is_accepted))
+                ranker_input = []
+                prog_data = []
+                sample_data = None
+                for k_idx in range(top_k):
+                    act_list = model_out[e_idx][k_idx]
+                    logic_json, ret_val = None, None
+                    try:
+                        logic_json = ProgramTree.get_logic_json_from_action_list(act_list, trans_sent)
+                        ret_val = ProgramTree.execute(table_name, logic_json)
+                        is_accepted = check_if_accept(logic_json['func'], ret_val, mask_val[1])
+                    except Exception as err:
+                        is_accepted = False
+                    try:
+                        ljsonstr = ProgramTree.logic_json_to_str(logic_json)
+                    except:
+                        ljsonstr = None
+                    if ljsonstr is not None:
+                        ljsonstr += f'={ret_val}/{is_accepted}'
+                        label = ljsonstr[ljsonstr.rfind('/') + 1:] == 'True'
+                        prog = ljsonstr[:ljsonstr.rfind('=')]
+                        ip_sent = RobertaRanker._get_input_sent(trans_sent, prog, model)
+                        ranker_input.append((ip_sent, label))
+                        prog_data.append((act_list, ljsonstr, is_accepted))
+                    sample_data = act_list, ljsonstr, is_accepted
+                with torch.no_grad():
+                    if len(ranker_input) > 0 and top_k > 1:
+                        ranker_ip_sents, labels, = zip(*ranker_input)
+                        labels = model.new_long_tensor(labels).unsqueeze(1)
+                        padded_sequences = ranker_model.tokenizer(
+                            ranker_ip_sents, padding=True, truncation=True, return_tensors="pt")
+                        output = model(padded_sequences, labels)
+                        probs = F.softmax(output.logits, dim=-1)
+                        scores = probs[:, 1]
+                        max_score_idx = torch.argmax(scores).item()
+                        max_score = scores[max_score_idx].item()
+                        act_list, ljsonstr, is_accepted = prog_data[max_score_idx]
+                    else:
+                        act_list, ljsonstr, is_accepted = sample_data
+                        max_score = 1
+
+                results.append((table_name, og_sent, trans_sent,
+                                mask_val, act_list, max_score, ljsonstr, is_accepted))
         return results
 
     @staticmethod
@@ -1881,6 +2177,8 @@ def init_plstm_arg_parser():
     parser.add_argument('--max_actions', default=50, type=int, help="Max actions to consider while parsing")
     parser.add_argument('--dbg_sent', default='',
                         type=str, help="Run only on the given sentence for debugging")
+    parser.add_argument('--ranker_model_path', default='',
+                        type=str, help="Load ranker model from this path")
 
     # rl args
     # batch_size, max_actions,
