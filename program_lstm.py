@@ -867,6 +867,14 @@ class BeamSearchNode:
         self.score += log_prob
         return
 
+    def __hash__(self):
+        return hash((tuple(self.history_actions), self.score))
+
+    def __eq__(self, other):
+        if not isinstance(other, type(self)):
+            return NotImplemented
+        return (self.history_actions, self.score) == (other.history_actions, other.score)
+
 
 class ProgramLSTM(nn.Module):
     """
@@ -1613,6 +1621,7 @@ class ProgramLSTM(nn.Module):
             for batch_id in range(batch_size):
                 candidate_bsns = [new_beam_search_nodes[(batch_id, bw_id)] for bw_id in range(beam_width)]
                 candidate_bsns = [x for y in candidate_bsns for x in y]
+                candidate_bsns = list(set(candidate_bsns))
                 candidate_bsns = sorted(candidate_bsns, key=lambda bsn: bsn.score, reverse=True)
                 beam_search_nodes[batch_id] = candidate_bsns[:beam_width]
 
@@ -1914,7 +1923,7 @@ class ProgramLSTM(nn.Module):
         assert args.top_k == 1 or len(args.ranker_model_path) > 0
         if len(args.ranker_model_path) > 0 and args.top_k > 1:
             from ranker_model import RobertaRanker
-            ranker_model = RobertaRanker.load(args.model_path, args.cuda)
+            ranker_model = RobertaRanker.load(args.ranker_model_path, args.cuda)
             device_str = 'cuda' if args.cuda else 'cpu'
             device = torch.device(device_str)
             ranker_model.to(device)
@@ -1981,7 +1990,7 @@ class ProgramLSTM(nn.Module):
                         labels = model.new_long_tensor(labels).unsqueeze(1)
                         padded_sequences = ranker_model.tokenizer(
                             ranker_ip_sents, padding=True, truncation=True, return_tensors="pt")
-                        output = model(padded_sequences, labels)
+                        output = ranker_model(padded_sequences, labels)
                         probs = F.softmax(output.logits, dim=-1)
                         scores = probs[:, 1]
                         max_score_idx = torch.argmax(scores).item()
