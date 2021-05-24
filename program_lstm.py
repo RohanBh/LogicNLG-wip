@@ -1907,9 +1907,9 @@ class ProgramLSTM(nn.Module):
         return
 
     @staticmethod
-    def get_model_results(in_fname, model, args, top_k=1, beam_width=1):
-        assert top_k == 1 or len(args.ranker_model_path) > 0
-        if len(args.ranker_model_path) > 0 and top_k > 1:
+    def get_model_results(in_fname, model, args):
+        assert args.top_k == 1 or len(args.ranker_model_path) > 0
+        if len(args.ranker_model_path) > 0 and args.top_k > 1:
             ranker_model = RobertaRanker.load(args.model_path, args.cuda)
             device_str = 'cuda' if args.cuda else 'cpu'
             device = torch.device(device_str)
@@ -1940,7 +1940,7 @@ class ProgramLSTM(nn.Module):
 
             padded_sequences = model.tokenizer(sent_list, padding=True, truncation=True, return_tensors="pt")
             with torch.no_grad():
-                model_out = model.beam_parse(padded_sequences, args.max_actions, top_k, beam_width)
+                model_out = model.beam_parse(padded_sequences, args.max_actions, args.top_k, args.beam_width)
 
             for e_idx in range(len(entries)):
                 trans_sent, table_name = sent_list[e_idx], table_names[e_idx]
@@ -1949,7 +1949,7 @@ class ProgramLSTM(nn.Module):
                 ranker_input = []
                 prog_data = []
                 sample_data = None
-                for k_idx in range(top_k):
+                for k_idx in range(args.top_k):
                     act_list = model_out[e_idx][k_idx]
                     logic_json, ret_val = None, None
                     try:
@@ -1971,7 +1971,7 @@ class ProgramLSTM(nn.Module):
                         prog_data.append((act_list, ljsonstr, is_accepted))
                     sample_data = act_list, ljsonstr, is_accepted
                 with torch.no_grad():
-                    if len(ranker_input) > 0 and top_k > 1:
+                    if len(ranker_input) > 0 and args.top_k > 1:
                         ranker_ip_sents, labels, = zip(*ranker_input)
                         labels = model.new_long_tensor(labels).unsqueeze(1)
                         padded_sequences = ranker_model.tokenizer(
@@ -2179,6 +2179,8 @@ def init_plstm_arg_parser():
                         type=str, help="Run only on the given sentence for debugging")
     parser.add_argument('--ranker_model_path', default='',
                         type=str, help="Load ranker model from this path")
+    parser.add_argument('--beam_width', default=10, type=int, help="Beam width to consider while decoding")
+    parser.add_argument('--top_k', default=1, type=int, help="Number of best k programs to rank")
 
     # rl args
     # batch_size, max_actions,
