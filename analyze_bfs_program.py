@@ -178,7 +178,29 @@ def main2():
     show_dist_3(path)
     return
 
+def analyze_out_34():
+    with open('gpt2_lm_outputs/out_034.json') as fp:
+        data = json.load(fp)
+    null_stmts = 0
+    counter = {}
+    for k, v in data.items():
+        for _v in v:
+            if _v[1] is None:
+                null_stmts += 1
+                continue
+            prog = _v[1]
+            prog_type = prog.split('{')[0].strip()
+            if prog_type == 'hop':
+                prog_type = prog.split('{')[1].strip()
+                if '=' in prog_type and '/False' in prog_type:
+                    prog_type = 'hop'
+            if prog_type not in counter:
+                counter[prog_type] = 0
+            counter[prog_type] += 1
+    pprint.pprint(counter)
+    return
 
 if __name__ == '__main__':
     # main()
-    main2()
+    # main2()
+    analyze_out_34()
