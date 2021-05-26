@@ -1576,6 +1576,8 @@ class ProgramLSTM(nn.Module):
                         copy_mask = np.zeros((input_ids.size(1),), dtype='float32')
                         copy_mask[token_pos_list] = 1
                         copy_mask = torch.from_numpy(copy_mask).bool()
+                        if not torch.any(copy_mask):
+                            copy_mask[0] = True
                         if self.device != torch.device('cpu'):
                             copy_mask = copy_mask.cuda()
                         # (1, 1, seq_len)
@@ -1623,6 +1625,8 @@ class ProgramLSTM(nn.Module):
                 candidate_bsns = [x for y in candidate_bsns for x in y]
                 candidate_bsns = list(set(candidate_bsns))
                 candidate_bsns = sorted(candidate_bsns, key=lambda bsn: bsn.score, reverse=True)
+                while len(candidate_bsns) < beam_width:
+                    candidate_bsns.append(copy.deepcopy(candidate_bsns[0]))
                 beam_search_nodes[batch_id] = candidate_bsns[:beam_width]
 
         # (batch_size, top_k, n_actions_variable)

@@ -171,11 +171,12 @@ def show_dist_3(path):
 
 def main2():
     # path = Path("plstm_outputs/out_rbn_129.json")
-    path = Path("roberta_ranker_outputs/out_004.json")
+    path = Path("plstm_outputs/out_plstm_with_beam_search_and_ranker__10_top_k_5.json")
+    # path = Path("roberta_ranker_outputs/out_004.json")
     # TODO: Fix this. Prints wrong metrics as roberta outputs discard FNs.
     print_check_proportion(path)
-    # show_dist_2(path)
-    show_dist_3(path)
+    show_dist_2(path)
+    # show_dist_3(path)
     return
 
 def analyze_out_34():
@@ -202,5 +203,5 @@ def analyze_out_34():
 
 if __name__ == '__main__':
     # main()
-    # main2()
-    analyze_out_34()
+    main2()
+    # analyze_out_34()
