@@ -1755,7 +1755,7 @@ class ProgramLSTM(nn.Module):
                 model.eval()
                 with torch.no_grad():
                     val_results = ProgramLSTM.get_model_results('data/plstm_valid.json', model, args)
-                val_results = [(x[-1], x[-2] != None) for x in val_results]
+                val_results = [(x[-1], x[-2] is not None) for x in val_results]
                 ctr = Counter(val_results)
                 ctr2 = {
                     'FN': ctr[(False, False)],
@@ -2207,6 +2207,32 @@ def init_plstm_arg_parser():
     parser.add_argument('--value_coeff', default=0.5, type=float, help="Coeff for value loss")
 
     return parser.parse_args()
+
+
+def val_all_plstm_models(args):
+    import glob
+    out_dict = {'Coverage': {}, 'FN': {}, 'FP': {}, 'TP': {}}
+    for model_path in glob.glob(' /mnt/hhd/rohan/plstm_models/ws_model_*.pt'):
+        epoch_idx = int(model_path[-6:-3])
+        plstm_model = ProgramLSTM.load(model_path, True)
+        plstm_model.to('CUDA')
+        plstm_model.eval()
+        with torch.no_grad():
+            val_results = ProgramLSTM.get_model_results('data/plstm_valid.json', plstm_model, args)
+        val_results = [(x[-1], x[-2] is not None) for x in val_results]
+        ctr = Counter(val_results)
+        ctr2 = {
+            'FN': ctr[(False, False)],
+            'FP': ctr[(False, True)],
+            'TP': ctr[(True, True)],
+        }
+        coverage = ctr2['TP'] / len(val_results)
+        out_dict['Coverage'][epoch_idx] = coverage
+        out_dict['FN'][epoch_idx] = ctr2['FN']
+        out_dict['FP'][epoch_idx] = ctr2['FP']
+        out_dict['TP'][epoch_idx] = ctr2['TP']
+    pprint.pprint(out_dict, indent=2)
+    return
 
 
 def main():
