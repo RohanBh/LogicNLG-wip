@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from torch import nn
-import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 from transformers import RobertaTokenizer, AdamW, get_linear_schedule_with_warmup, \
@@ -181,7 +181,7 @@ class RobertaRanker(nn.Module):
 
     @staticmethod
     def _get_input_sent(ml_sent, prog, model):
-        return prog + ' ' + model.tokenizer.sep_token + ' ' + ml_sent
+        return prog + model.tokenizer.sep_token + model.tokenizer.sep_token + ml_sent
 
     @staticmethod
     def train_ranker(args):
@@ -197,12 +197,15 @@ class RobertaRanker(nn.Module):
         model.to(device)
         model.train()
 
+        criterion = nn.CrossEntropyLoss(weight=model.new_tensor([0.1, 0.9]))
+
         with open('data/train_ranker.json') as fp:
             data = json.load(fp)
 
         train_data = []
         for entry in data:
             ip_sent = RobertaRanker._get_input_sent(entry[2], entry[3], model)
+            # TODO: Do undersampling here. Shift this calculation to each epoch
             train_data.append((ip_sent, entry[-1]))
 
         optimizer = AdamW(model.parameters(), args.lr)
@@ -234,15 +237,17 @@ class RobertaRanker(nn.Module):
                             total=len(train_data) // args.batch_size + 1):
                 global_step += 1
                 sent_list, labels = zip(*train_data[idx:idx + args.batch_size])
+                # TODO: Apply input dropout here
                 padded_sequences = model.tokenizer(sent_list, padding=True, truncation=True, return_tensors="pt")
-                labels = model.new_long_tensor(labels).unsqueeze(1)
+                labels = model.new_long_tensor(labels)
                 optimizer.zero_grad()
                 output = model(padded_sequences, labels)
-                loss = output.loss
-                avg_loss += loss.item()
                 logits = output.logits
+                # loss = output.loss
+                loss = criterion(logits, labels)
+                avg_loss += loss.item()
 
-                true_labels += labels.flatten().tolist()
+                true_labels += labels.tolist()
                 predict_labels += logits.argmax(axis=-1).flatten().tolist()
 
                 loss.backward()
