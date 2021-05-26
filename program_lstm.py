@@ -1728,6 +1728,7 @@ class ProgramLSTM(nn.Module):
                 batch_progs = all_programs[idx:idx + args.batch_size]
                 optimizer.zero_grad()
                 ret_val = model.score(batch_progs)
+                # TODO: Check if this is correct. It seems like we are considering only the first programs's loss here
                 loss = -ret_val[0]
                 avg_loss += torch.sum(loss).data.item()
                 loss = torch.mean(loss)

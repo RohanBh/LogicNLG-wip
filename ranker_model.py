@@ -17,7 +17,7 @@ from transformers import RobertaTokenizer, AdamW, get_linear_schedule_with_warmu
     RobertaForSequenceClassification, RobertaConfig
 
 from l2t_parse_fill import get_col_types, Parser
-from program_lstm import NEW_TOKENS, ProgramTree
+from program_lstm import NEW_TOKENS, ProgramTree, ProgramLSTM
 
 
 def _get_hash(table_name, sent):
@@ -68,8 +68,33 @@ def create_ranker_train_data():
                 table_name, sent, masked_linked_sent, prog, 0
             ))
 
+    # TODO: Load the most promising PLSTM model and add the model score for each program
+    plstm_model = ProgramLSTM.load('/mnt/hhd/rohan/plstm_models/ws_model_129.pt')
+    plstm_model.to('cuda')
+    plstm_model.eval()
+    new_out_data = []
+    all_programs = []
+    program_scores = []
+    for entry in out_data:
+        table_name, sent, masked_linked_sent, prog, label = entry
+        pt = ProgramTree.from_str(prog)
+        pt.sent = masked_linked_sent
+        all_programs.append(pt)
+
+    # 32 is the batch size
+    batch_size = 32
+    for idx in tqdm(range(0, len(all_programs), batch_size),
+                    total=len(all_programs) // batch_size + 1):
+        batch_progs = all_programs[idx:idx + batch_size]
+        ret_val = plstm_model.score(batch_progs)
+        program_scores.extend(ret_val.tolist())
+
+    for entry, score in zip(out_data, program_scores):
+        table_name, sent, masked_linked_sent, prog, label = entry
+        new_out_data.append((table_name, sent, masked_linked_sent, prog, score, label))
+
     with open('data/train_ranker.json', 'w') as fp:
-        json.dump(out_data, fp, indent=2)
+        json.dump(new_out_data, fp, indent=2)
     return
 
 
@@ -109,18 +134,18 @@ def get_stats():
     return
 
 
-def downsample_neg():
-    with open('data/train_ranker.json') as fp:
-        data = json.load(fp)
-    pos_data = [x for x in data if x[-1] == 1]
-    neg_data = [x for x in data if x[-1] == 0]
-    ids = np.random.choice(range(len(neg_data)), 100000)
-    neg_data = [neg_data[i] for i in ids]
-    data = pos_data + neg_data
-    random.shuffle(data)
-    with open('data/train_ranker.json', 'w') as fp:
-        json.dump(data, fp, indent=2)
-    return
+# def downsample_neg():
+#     with open('data/train_ranker.json') as fp:
+#         data = json.load(fp)
+#     pos_data = [x for x in data if x[-1] == 1]
+#     neg_data = [x for x in data if x[-1] == 0]
+#     ids = np.random.choice(range(len(neg_data)), 100000)
+#     neg_data = [neg_data[i] for i in ids]
+#     data = pos_data + neg_data
+#     random.shuffle(data)
+#     with open('data/train_ranker.json', 'w') as fp:
+#         json.dump(data, fp, indent=2)
+#     return
 
 
 class RobertaRanker(nn.Module):
@@ -180,8 +205,11 @@ class RobertaRanker(nn.Module):
         return roberta_ranker
 
     @staticmethod
-    def _get_input_sent(ml_sent, prog, model):
-        return prog + model.tokenizer.sep_token + model.tokenizer.sep_token + ml_sent
+    def _get_input_sent(ml_sent, prog, model, plstm_score=None):
+        extra_ = ''
+        if plstm_score is None and isinstance(plstm_score, float):
+            extra_ = f' . The confidence in the program is {plstm_score}'
+        return prog + model.tokenizer.sep_token + model.tokenizer.sep_token + ml_sent + extra_
 
     @staticmethod
     def train_ranker(args):
@@ -202,16 +230,11 @@ class RobertaRanker(nn.Module):
         with open('data/train_ranker.json') as fp:
             data = json.load(fp)
 
-        train_data = []
-        for entry in data:
-            ip_sent = RobertaRanker._get_input_sent(entry[2], entry[3], model)
-            # TODO: Do undersampling here. Shift this calculation to each epoch
-            train_data.append((ip_sent, entry[-1]))
-
         optimizer = AdamW(model.parameters(), args.lr)
         scheduler = get_linear_schedule_with_warmup(
             optimizer, num_warmup_steps=args.warmup_steps,
-            num_training_steps=args.epochs * (len(train_data) // args.batch_size + 1))
+            # TODO: Fix hardcoded value
+            num_training_steps=args.epochs * ((100000 + 7394) // args.batch_size + 1))
 
         global_step = avg_loss = 0
 
@@ -231,13 +254,25 @@ class RobertaRanker(nn.Module):
 
         for epoch_idx in range(start_epoch, args.epochs):
             print("start training {}th epoch".format(epoch_idx))
+            train_data = []
+            # Do undersampling
+            pos_data = [x for x in data if x[-1] == 1]
+            neg_data = [x for x in data if x[-1] == 0]
+            # TODO: Fix hardcoded value
+            ids = np.random.choice(range(len(neg_data)), 100000, replace=False)
+            neg_data = [neg_data[i] for i in ids]
+            data = pos_data + neg_data
+            for entry in data:
+                # TODO: Get the plstm score
+                ip_sent = RobertaRanker._get_input_sent(entry[2], entry[3], model)
+                # TODO: Apply input dropout here
+                train_data.append((ip_sent, entry[-1]))
             random.shuffle(train_data)
             true_labels, predict_labels = [], []
             for idx in tqdm(range(0, len(train_data), args.batch_size),
                             total=len(train_data) // args.batch_size + 1):
                 global_step += 1
                 sent_list, labels = zip(*train_data[idx:idx + args.batch_size])
-                # TODO: Apply input dropout here
                 padded_sequences = model.tokenizer(sent_list, padding=True, truncation=True, return_tensors="pt")
                 labels = model.new_long_tensor(labels)
                 optimizer.zero_grad()
@@ -350,6 +385,7 @@ def init_ranker_arg_parser():
                         type=str, help="Save model and ckpt in this directory")
     parser.add_argument('--model_path', default='', type=str, help="Load model from this path")
     parser.add_argument('--ckpt_path', default='', type=str, help="Load checkpoint from this path")
+    parser.add_argument('--plstm_model_path', default='', type=str, help="Load Program LSTM from here")
 
     # test args
     parser.add_argument('--out_id', default='', type=str, help='Output id for storing final outputs')
@@ -357,7 +393,7 @@ def init_ranker_arg_parser():
 
 
 def main():
-    # create_ranker_train_data()
+    create_ranker_train_data()
     # create_ranker_test_data()
     # downsample_neg()
     # get_stats()
