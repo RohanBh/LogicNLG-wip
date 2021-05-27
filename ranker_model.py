@@ -68,8 +68,7 @@ def create_ranker_train_data():
                 table_name, sent, masked_linked_sent, prog, 0
             ))
 
-    # TODO: Load the most promising PLSTM model and add the model score for each program
-    plstm_model = ProgramLSTM.load('/mnt/hhd/rohan/plstm_models/ws_model_129.pt')
+    plstm_model = ProgramLSTM.load('/mnt/hhd/rohan/plstm_models/ws_model_129.pt', True)
     plstm_model.to('cuda')
     plstm_model.eval()
     new_out_data = []
@@ -81,8 +80,7 @@ def create_ranker_train_data():
         pt.sent = masked_linked_sent
         all_programs.append(pt)
 
-    # 32 is the batch size
-    batch_size = 32
+    batch_size = 24
     for idx in tqdm(range(0, len(all_programs), batch_size),
                     total=len(all_programs) // batch_size + 1):
         batch_progs = all_programs[idx:idx + batch_size]
@@ -223,7 +221,6 @@ class RobertaRanker(nn.Module):
         else:
             model = RobertaRanker(args.model, device_str)
         model.to(device)
-        model.train()
 
         criterion = nn.CrossEntropyLoss(weight=model.new_tensor([0.1, 0.9]))
 
@@ -254,6 +251,7 @@ class RobertaRanker(nn.Module):
 
         for epoch_idx in range(start_epoch, args.epochs):
             print("start training {}th epoch".format(epoch_idx))
+            model.train()
             train_data = []
             # Do undersampling
             pos_data = [x for x in data if x[-1] == 1]
@@ -263,9 +261,8 @@ class RobertaRanker(nn.Module):
             neg_data = [neg_data[i] for i in ids]
             data = pos_data + neg_data
             for entry in data:
-                # TODO: Get the plstm score
-                ip_sent = RobertaRanker._get_input_sent(entry[2], entry[3], model)
-                # TODO: Apply input dropout here
+                plstm_sent_likelihood = entry[-2] if np.random.random() < args.ip_dropout else None
+                ip_sent = RobertaRanker._get_input_sent(entry[2], entry[3], model, plstm_sent_likelihood)
                 train_data.append((ip_sent, entry[-1]))
             random.shuffle(train_data)
             true_labels, predict_labels = [], []
@@ -312,23 +309,25 @@ class RobertaRanker(nn.Module):
                     save_path / f'ws_ckpt_{epoch_idx:03}.pt')
                 model.save(save_path / f'ws_model_{epoch_idx:03}.pt')
 
+                model.eval()
+                with torch.no_grad():
+                    valid_results = RobertaRanker.apply_ranker('data/valid_ranker.json', model)
+                tp = len([1 for x in valid_results if x[-1]])
+                fp = len(valid_results) - tp
+                fn = 1095 - tp - fp
+                coverage = tp / 1095
+                tb_writer.add_scalar("Validation coverage", coverage, epoch_idx)
+                tb_writer.add_scalar("Validation FN", fn, epoch_idx)
+                tb_writer.add_scalar("Validation FP", fp, epoch_idx)
+                tb_writer.add_scalar("Validation TP", tp, epoch_idx)
+
         tb_writer.flush()
         tb_writer.close()
         return
 
     @staticmethod
-    def apply_ranker(args):
-        print(args)
-        save_path = Path('roberta_ranker_outputs/')
-        save_path.mkdir(exist_ok=True)
-        device_str = 'cuda' if args.cuda else 'cpu'
-        device = torch.device(device_str)
-
-        model = RobertaRanker.load(args.model_path, args.cuda)
-        model.to(device)
-        model.eval()
-
-        with open('data/test_ranker.json') as fp:
+    def apply_ranker(in_fname, model):
+        with open(in_fname) as fp:
             data = json.load(fp)
 
         test_data = {}
@@ -348,7 +347,7 @@ class RobertaRanker(nn.Module):
             for k in tqdm(test_data.keys(), total=len(test_data)):
                 table_name, og_sent, ml_sent, masked_val, progs = test_data[k][-1]
                 sent_list, labels, = zip(*test_data[k][:-1])
-                labels = model.new_long_tensor(labels).unsqueeze(1)
+                labels = model.new_long_tensor(labels)
                 padded_sequences = model.tokenizer(
                     sent_list, padding=True, truncation=True, return_tensors="pt")
                 output = model(padded_sequences, labels)
@@ -361,6 +360,23 @@ class RobertaRanker(nn.Module):
                 out_data.append((
                     table_name, og_sent, ml_sent, masked_val, max_score, selected_progs, is_accept
                 ))
+
+        return out_data
+
+    @staticmethod
+    def apply_on_test_data(args):
+        print(args)
+        save_path = Path('roberta_ranker_outputs/')
+        save_path.mkdir(exist_ok=True)
+        device_str = 'cuda' if args.cuda else 'cpu'
+        device = torch.device(device_str)
+
+        model = RobertaRanker.load(args.model_path, args.cuda)
+        model.to(device)
+        model.eval()
+
+        out_data = RobertaRanker.apply_ranker('data/test_ranker.json', model)
+
         with open(save_path / f'out_{args.out_id}.json', 'w') as fp:
             json.dump(out_data, fp, indent=2)
         return
@@ -386,6 +402,9 @@ def init_ranker_arg_parser():
     parser.add_argument('--model_path', default='', type=str, help="Load model from this path")
     parser.add_argument('--ckpt_path', default='', type=str, help="Load checkpoint from this path")
     parser.add_argument('--plstm_model_path', default='', type=str, help="Load Program LSTM from here")
+    parser.add_argument('--ip_dropout', default=0.3, type=float,
+                        help="The probability with which to drop the Program LSTM's"
+                             " likelihood as an input to the ranker")
 
     # test args
     parser.add_argument('--out_id', default='', type=str, help='Output id for storing final outputs')
@@ -401,7 +420,7 @@ def main():
     if args.do_train:
         RobertaRanker.train_ranker(args)
     elif args.do_test:
-        RobertaRanker.apply_ranker(args)
+        RobertaRanker.apply_on_test_data(args)
     return
 
 
