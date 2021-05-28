@@ -205,7 +205,7 @@ class RobertaRanker(nn.Module):
     @staticmethod
     def _get_input_sent(ml_sent, prog, model, plstm_score=None):
         extra_ = ''
-        if plstm_score is None and isinstance(plstm_score, float):
+        if plstm_score is not None and isinstance(plstm_score, float):
             extra_ = f' . The confidence in the program is {plstm_score}'
         return prog + model.tokenizer.sep_token + model.tokenizer.sep_token + ml_sent + extra_
 
