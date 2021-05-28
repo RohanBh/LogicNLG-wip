@@ -287,7 +287,7 @@ class RobertaRanker(nn.Module):
                 optimizer.step()
                 scheduler.step()
 
-                if idx % args.every == 0:
+                if idx % args.every == 0 and idx > 0:
                     tb_writer.add_scalar("Avg loss", avg_loss / args.every, global_step)
                     avg_loss = 0
 
@@ -412,7 +412,7 @@ def init_ranker_arg_parser():
 
 
 def main():
-    create_ranker_train_data()
+    # create_ranker_train_data()
     # create_ranker_test_data()
     # downsample_neg()
     # get_stats()

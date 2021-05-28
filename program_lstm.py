@@ -769,6 +769,8 @@ class ProgramTreeBatch:
                         elif 'memory' in field_type:
                             tok_pos_list = extract1(pt_id, 'ent_start_tok', 'ent_end_tok')
                         else:
+                            # TODO: Fix this. Actually, diff may take a memory object's object as the input
+                            #  So, an obj type may match on specifically the entities of type `obj`
                             raise ValueError(f"Action {action_info} doesn't match field type {field_type}")
                         self.generic_copy_mask[curr_ac_ix, pt_id, tok_pos_list] = 1.
                         # avoid nan in softmax trick
@@ -1985,7 +1987,10 @@ class ProgramLSTM(nn.Module):
                         if args.top_k > 1:
                             label = ljsonstr[ljsonstr.rfind('/') + 1:] == 'True'
                             prog = ljsonstr[:ljsonstr.rfind('=')]
-                            ip_sent = RobertaRanker._get_input_sent(trans_sent, prog, model)
+                            pt = ProgramTree.from_str(prog)
+                            pt.sent = trans_sent
+                            ip_sent = RobertaRanker._get_input_sent(
+                                trans_sent, prog, ranker_model, model.score([pt]).item())
                             ranker_input.append((ip_sent, label))
                             prog_data.append((act_list, ljsonstr, is_accepted))
                     sample_data = act_list, ljsonstr, is_accepted
